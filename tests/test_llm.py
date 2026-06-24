@@ -51,3 +51,46 @@ def test_openrouter_client_requests_structured_diagnosis():
     assert http.payload["response_format"]["type"] == "json_schema"
     assert report.summary == "The deploy step timed out."
     assert report.evidence[0].line == 2
+
+
+def test_openrouter_client_sends_follow_up_chat_without_schema():
+    config = Config.load(None)
+    config.llm.api_key = "token"
+    config.llm.model = "openrouter/auto"
+    http = FakeChatHttp()
+
+    answer = OpenRouterClient(config.llm, http=http).chat(
+        "diagnosis context",
+        [{"role": "user", "content": "What should I inspect next?"}],
+    )
+
+    assert answer == "Inspect the readiness gate."
+    assert http.payload["model"] == "openrouter/auto"
+    assert "response_format" not in http.payload
+    assert http.payload["messages"][0]["role"] == "system"
+    assert http.payload["messages"][1] == {
+        "role": "user",
+        "content": "diagnosis context",
+    }
+    assert http.payload["messages"][2] == {
+        "role": "user",
+        "content": "What should I inspect next?",
+    }
+
+
+class FakeChatHttp:
+    def __init__(self):
+        self.payload = None
+
+    def post_json(self, url, payload, headers):
+        self.payload = payload
+        assert headers["Authorization"] == "Bearer token"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Inspect the readiness gate.",
+                    }
+                }
+            ]
+        }

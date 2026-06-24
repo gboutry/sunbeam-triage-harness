@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 
@@ -19,10 +20,19 @@ class SwiftObject:
 
 
 @dataclass(frozen=True)
+class SwiftDownloadFailure:
+    name: str
+    path: str
+    url: str
+    error: str
+
+
+@dataclass(frozen=True)
 class MirrorManifest:
     uuid: str
     root: Path
     objects: tuple[SwiftObject, ...]
+    failures: tuple[SwiftDownloadFailure, ...] = ()
 
 
 class SwiftMirror:
@@ -31,7 +41,14 @@ class SwiftMirror:
         self.artifact_root = Path(artifact_root)
         self.http = http or UrlLibHttp(timeout=swift_config.timeout_seconds)
 
-    def mirror_uuid(self, uuid: str, *, refresh: bool = False) -> MirrorManifest:
+    def mirror_uuid(
+        self,
+        uuid: str,
+        *,
+        refresh: bool = False,
+        progress: Callable[[dict], None] | None = None,
+        continue_on_error: bool = False,
+    ) -> MirrorManifest:
         try:
             listing = self._list(uuid)
         except (HTTPError, URLError) as exc:
@@ -54,10 +71,70 @@ class SwiftMirror:
                 bytes=int(item.get("bytes", 0)),
             )
             objects.append(obj)
+
+        total = len(objects)
+        failures: list[SwiftDownloadFailure] = []
+        for index, obj in enumerate(objects, start=1):
+            name = obj.name
+            rel = name[len(uuid) + 1 :]
             path = root / rel
+            url = self._object_url(name)
             if not refresh and self._is_unchanged(path, obj):
+                _emit_progress(
+                    progress,
+                    index=index,
+                    total=total,
+                    name=name,
+                    path=path,
+                    url=url,
+                    status="cached",
+                )
                 continue
-            self.http.download(self._object_url(name), path)
+            _emit_progress(
+                progress,
+                index=index,
+                total=total,
+                name=name,
+                path=path,
+                url=url,
+                status="downloading",
+            )
+            try:
+                self.http.download(url, path)
+            except (HTTPError, URLError, OSError) as exc:
+                error = str(exc)
+                failure = SwiftDownloadFailure(
+                    name=name,
+                    path=str(path),
+                    url=url,
+                    error=error,
+                )
+                failures.append(failure)
+                _emit_progress(
+                    progress,
+                    index=index,
+                    total=total,
+                    name=name,
+                    path=path,
+                    url=url,
+                    status="failed",
+                    error=error,
+                )
+                if continue_on_error:
+                    continue
+                raise RuntimeError(
+                    "Failed to download Swift object "
+                    f"{name} to {path} from {url}: {exc}"
+                ) from exc
+            _emit_progress(
+                progress,
+                index=index,
+                total=total,
+                name=name,
+                path=path,
+                url=url,
+                status="downloaded",
+            )
 
         manifest_path = root / ".sunbeam-triage-manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,7 +142,12 @@ class SwiftMirror:
             json.dumps([obj.__dict__ for obj in objects], indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        return MirrorManifest(uuid=uuid, root=root, objects=tuple(objects))
+        return MirrorManifest(
+            uuid=uuid,
+            root=root,
+            objects=tuple(objects),
+            failures=tuple(failures),
+        )
 
     def _list(self, uuid: str) -> list[dict]:
         url = f"{self.swift_config.base_url}/?prefix={quote(uuid + '/')}&format=json"
@@ -82,3 +164,29 @@ class SwiftMirror:
             return True
         digest = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
         return digest == obj.hash
+
+
+def _emit_progress(
+    progress: Callable[[dict], None] | None,
+    *,
+    index: int,
+    total: int,
+    name: str,
+    path: Path,
+    url: str,
+    status: str,
+    error: str | None = None,
+) -> None:
+    if progress is None:
+        return
+    event = {
+        "index": index,
+        "total": total,
+        "name": name,
+        "path": str(path),
+        "url": url,
+        "status": status,
+    }
+    if error is not None:
+        event["error"] = error
+    progress(event)

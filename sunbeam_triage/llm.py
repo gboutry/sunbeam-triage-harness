@@ -160,3 +160,30 @@ class OpenRouterClient:
         except json.JSONDecodeError as exc:
             raise RuntimeError("LLM response was not valid JSON") from exc
         return DiagnosisReport.from_dict(data)
+
+    def chat(self, context_text: str, messages: list[dict[str, str]]) -> str:
+        if not self.config.api_key:
+            raise RuntimeError(
+                f"Missing OpenRouter API key. Set {self.config.api_key_env}."
+            )
+        payload = {
+            "model": self.config.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are continuing a Sunbeam CI failure diagnosis. "
+                        "Use the provided diagnosis context and evidence. "
+                        "Separate evidence from inference."
+                    ),
+                },
+                {"role": "user", "content": context_text},
+                *messages,
+            ],
+        }
+        response = self.http.post_json(
+            f"{self.config.base_url}/chat/completions",
+            payload,
+            headers={"Authorization": f"Bearer {self.config.api_key}"},
+        )
+        return str(response["choices"][0]["message"]["content"])
