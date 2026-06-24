@@ -343,7 +343,7 @@ def _render_tool_activity_tab(session: dict[str, Any]) -> None:
     cols[0].metric("Exchanges", analysis["exchange_count"])
     cols[1].metric("Tool calls", analysis["tool_call_count"])
     cols[2].metric("Tool result chars", analysis["tool_result_chars"])
-    cols[3].metric("Tokens", analysis["total_tokens"])
+    cols[3].metric("Session tokens", analysis["total_tokens"])
     if analysis["warnings"]:
         st.warning(", ".join(analysis["warnings"]))
     if analysis["repeated_reads"]:

@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
             f"tool_calls={analysis['tool_call_count']} "
             f"tool_results={analysis['tool_result_count']} "
             f"tool_result_chars={analysis['tool_result_chars']} "
-            f"tokens={analysis['total_tokens']} "
+            f"session_tokens={analysis['total_tokens']} "
             f"warnings={warnings}"
         )
         for row in analysis["rows"]:
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"tool={row['tool_name']} "
                 f"target={target} "
                 f"result_chars={row['result_chars']} "
-                f"tokens={row['total_tokens']}"
+                f"exchange_tokens={row['total_tokens']}"
             )
     return 0
 

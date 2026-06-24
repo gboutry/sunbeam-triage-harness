@@ -37,4 +37,5 @@ def test_analyze_rounds_prints_session_summary(tmp_path, capsys):
     assert "uuid-1" in output
     assert "exchanges=1" in output
     assert "tool_calls=1" in output
-    assert "tokens=42" in output
+    assert "session_tokens=42" in output
+    assert "exchange_tokens=42" in output
