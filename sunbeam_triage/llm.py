@@ -151,6 +151,8 @@ class OpenRouterClient:
                         "You are a CI failure diagnostician. Use only the provided "
                         "evidence. Do not invent files, timestamps, or causes. "
                         "If more log context is needed, list artifact files first. "
+                        "For sosreport archives, search inside the archive before "
+                        "reading a specific member. "
                         "Read a specific file only when it is likely to materially "
                         "improve the diagnosis, because file reads can be costly."
                     ),
@@ -192,9 +194,11 @@ class OpenRouterClient:
                         "You are continuing a Sunbeam CI failure diagnosis. "
                         "Use the provided diagnosis context and evidence. "
                         "Separate evidence from inference. If more log context "
-                        "is needed, list artifact files first. Read a specific "
-                        "file only when it is likely to materially improve the "
-                        "answer, because file reads can be costly."
+                        "is needed, list artifact files first. For sosreport "
+                        "archives, search inside the archive before reading a "
+                        "specific member. Read a specific file only when it is "
+                        "likely to materially improve the answer, because file "
+                        "reads can be costly."
                     ),
                 },
                 {"role": "user", "content": context_text},

@@ -1,4 +1,6 @@
+import io
 import json
+import tarfile
 
 from sunbeam_triage.config import Config
 from sunbeam_triage.llm import OpenRouterClient
@@ -299,6 +301,52 @@ def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     assert "failure detail" in sdk.chat.calls[1]["messages"][-1]["content"]
 
 
+def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    archive = artifact_root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"
+    _write_tar_member(
+        archive,
+        "sosreport-node-a-2026-06-23-abc/home/ubuntu/snap/openstack/common/logs/sunbeam.log",
+        "starting\nResultType.COMPLETED\n",
+    )
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "search_sosreport",
+                        json.dumps(
+                            {
+                                "archive_path": (
+                                    "generated/sunbeam/"
+                                    "sosreport-node-a-2026-06-23-abc.tar.xz"
+                                ),
+                                "pattern": "ResultType.COMPLETED",
+                                "prefix": "home/ubuntu/snap/openstack/common/logs/",
+                            }
+                        ),
+                    )
+                ],
+            ),
+            FakeSdkResponse("The remote command completed."),
+        ]
+    )
+
+    answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [{"role": "user", "content": "Did the remote command complete?"}],
+        session_id="uuid",
+        artifact_root=artifact_root,
+    )
+
+    assert answer == "The remote command completed."
+    assert sdk.chat.calls[0]["tools"][4]["function"]["name"] == "search_sosreport"
+    assert sdk.chat.calls[1]["messages"][-1]["role"] == "tool"
+    assert "ResultType.COMPLETED" in sdk.chat.calls[1]["messages"][-1]["content"]
+
+
 def test_openrouter_client_answers_without_tools_after_max_tool_rounds(tmp_path):
     sdk = FakeSdkClient(
         [
@@ -323,3 +371,12 @@ def test_openrouter_client_answers_without_tools_after_max_tool_rounds(tmp_path)
     assert "tool_choice" not in sdk.chat.calls[1]
     assert "parallel_tool_calls" not in sdk.chat.calls[1]
     assert "tool budget is exhausted" in sdk.chat.calls[1]["messages"][-1]["content"]
+
+
+def _write_tar_member(path, name, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = content.encode("utf-8")
+    info = tarfile.TarInfo(name)
+    info.size = len(data)
+    with tarfile.open(path, "w:xz") as archive:
+        archive.addfile(info, io.BytesIO(data))
