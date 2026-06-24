@@ -23,7 +23,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
                             },
                         }
                     ],
-                    "usage": {"total_tokens": 100},
+                    "usage": {"total_tokens": 100, "cost": 0.01},
                 },
             },
             {
@@ -51,7 +51,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
                             },
                         }
                     ],
-                    "usage": {"total_tokens": 200},
+                    "usage": {"total_tokens": 200, "cost": 0.02},
                 },
             },
             {
@@ -66,7 +66,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
                         }
                     ]
                 },
-                "response": {"usage": {"total_tokens": 300}},
+                "response": {"usage": {"total_tokens": 300, "cost": 0.03}},
             },
         ],
     }
@@ -78,6 +78,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
     assert analysis["tool_result_count"] == 1
     assert analysis["tool_result_chars"] > 0
     assert analysis["total_tokens"] == 600
+    assert analysis["total_cost"] == 0.06
     assert analysis["repeated_reads"] == [
         {"tool": "get_artifact_file", "target": "generated/debug.log", "count": 2}
     ]
@@ -87,6 +88,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
     assert analysis["rows"][0]["tool_name"] == "get_artifact_file"
     assert analysis["rows"][0]["target"] == "generated/debug.log"
     assert analysis["rows"][0]["result_chars"] > 0
+    assert analysis["rows"][0]["cost"] == 0.01
 
 
 def test_analyze_tool_activity_handles_empty_sessions():
@@ -94,5 +96,6 @@ def test_analyze_tool_activity_handles_empty_sessions():
 
     assert analysis["exchange_count"] == 0
     assert analysis["tool_call_count"] == 0
+    assert analysis["total_cost"] == 0
     assert analysis["rows"] == []
     assert analysis["warnings"] == []

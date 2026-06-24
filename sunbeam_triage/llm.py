@@ -553,8 +553,12 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         "prompt_tokens",
         "completion_tokens",
         "total_tokens",
+        "completion_tokens_details",
         "prompt_tokens_details",
         "cache_write_tokens",
+        "cost",
+        "cost_details",
+        "is_byok",
     ):
         if hasattr(usage, name):
             data[name] = _json_safe(getattr(usage, name))

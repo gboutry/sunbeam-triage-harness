@@ -339,11 +339,12 @@ def _render_evidence_tab(session: dict[str, Any]) -> None:
 
 def _render_tool_activity_tab(session: dict[str, Any]) -> None:
     analysis = analyze_tool_activity(session)
-    cols = st.columns(4)
+    cols = st.columns(5)
     cols[0].metric("Exchanges", analysis["exchange_count"])
     cols[1].metric("Tool calls", analysis["tool_call_count"])
     cols[2].metric("Tool result chars", analysis["tool_result_chars"])
     cols[3].metric("Session tokens", analysis["total_tokens"])
+    cols[4].metric("Session cost", _format_usd(analysis["total_cost"]))
     if analysis["warnings"]:
         st.warning(", ".join(analysis["warnings"]))
     if analysis["repeated_reads"]:
@@ -450,6 +451,10 @@ def _report_from_session(session: dict[str, Any]) -> DiagnosisReport:
 def _format_attachment(item: dict[str, Any]) -> str:
     line = "" if item.get("line") is None else f":{item['line']}"
     return f"{item.get('path', '')}{line}"
+
+
+def _format_usd(value: float) -> str:
+    return f"${value:.6f}"
 
 
 def _line_at(text: str, number: int) -> str:

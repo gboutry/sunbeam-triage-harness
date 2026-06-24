@@ -42,6 +42,12 @@ class FakeUsage:
     total_tokens = 120
     prompt_tokens_details = {"cached_tokens": 75}
     cache_write_tokens = 25
+    cost = 0.00123
+    cost_details = {
+        "upstream_inference_prompt_cost": 0.0005,
+        "upstream_inference_completions_cost": 0.0007,
+    }
+    is_byok = False
 
 
 class FakePromptTokensDetails:
@@ -204,6 +210,12 @@ def test_openrouter_client_records_redacted_exchanges_and_usage_metrics():
                     "total_tokens": 120,
                     "prompt_tokens_details": {"cached_tokens": 75},
                     "cache_write_tokens": 25,
+                    "cost": 0.00123,
+                    "cost_details": {
+                        "upstream_inference_prompt_cost": 0.0005,
+                        "upstream_inference_completions_cost": 0.0007,
+                    },
+                    "is_byok": False,
                 },
             },
         }

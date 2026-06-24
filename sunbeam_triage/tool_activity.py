@@ -15,6 +15,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
     tool_result_chars = 0
     tool_result_count = 0
     total_tokens = 0
+    total_cost = 0.0
     budget_truncated = False
     fallback = False
     targets: Counter[tuple[str, str]] = Counter()
@@ -52,6 +53,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
         usage = response.get("usage", {}) if isinstance(response, dict) else {}
         if isinstance(usage, dict):
             total_tokens += int(usage.get("total_tokens") or 0)
+            total_cost += _coerce_float(usage.get("cost"))
 
         tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
         for call in tool_calls or []:
@@ -68,6 +70,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
                     "total_tokens": (
                         usage.get("total_tokens") if isinstance(usage, dict) else None
                     ),
+                    "cost": _coerce_float(usage.get("cost")),
                 }
             )
 
@@ -91,6 +94,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
         "tool_result_count": tool_result_count,
         "tool_result_chars": tool_result_chars,
         "total_tokens": total_tokens,
+        "total_cost": total_cost,
         "repeated_reads": repeated_reads,
         "warnings": warnings,
         "rows": rows,
@@ -125,6 +129,13 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
     if isinstance(parsed, dict):
         return parsed
     return {}
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _is_fallback_request(messages: list[Any]) -> bool:

@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
             f"tool_results={analysis['tool_result_count']} "
             f"tool_result_chars={analysis['tool_result_chars']} "
             f"session_tokens={analysis['total_tokens']} "
+            f"session_cost_usd={analysis['total_cost']:.6g} "
             f"warnings={warnings}"
         )
         for row in analysis["rows"]:
@@ -40,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"target={target} "
                 f"result_chars={row['result_chars']} "
                 f"exchange_tokens={row['total_tokens']}"
+                f" exchange_cost_usd={row['cost']:.6g}"
             )
     return 0
 
