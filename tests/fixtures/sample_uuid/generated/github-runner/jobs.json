@@ -1,0 +1,43 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 101,
+      "run_id": 202,
+      "workflow_name": "Building on tor3-sqa-shared_maas-dh1_j9_2",
+      "head_branch": "main",
+      "html_url": "https://github.example/job/101",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-06-01T10:00:00Z",
+      "completed_at": "2026-06-01T12:00:00Z",
+      "name": "Run the pipeline",
+      "steps": [
+        {
+          "name": "sunbeam_prepare_env",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-06-01T10:05:00Z",
+          "completed_at": "2026-06-01T10:10:00Z"
+        },
+        {
+          "name": "sunbeam_deploy",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 2,
+          "started_at": "2026-06-01T10:10:00Z",
+          "completed_at": "2026-06-01T11:10:00Z"
+        },
+        {
+          "name": "Collect logs",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-06-01T11:10:00Z",
+          "completed_at": "2026-06-01T11:20:00Z"
+        }
+      ]
+    }
+  ]
+}

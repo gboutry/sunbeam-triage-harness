@@ -1,0 +1,10 @@
+Model      Controller          Cloud/Region                 Version  SLA          Timestamp
+openstack  sunbeam-controller  direct-sample-k8s/localhost  3.6.12   unsupported  11:20:00Z
+
+App                         Version  Status       Scale  Charm       Channel  Rev  Address  Exposed  Message
+keystone                             active           3  keystone    stable   1    10.0.0.1 no
+placement-mysql-router              maintenance      3  mysql       stable   1    10.0.0.2 no       Waiting for K8s service connectivity
+
+Unit                           Workload  Agent      Address     Ports  Message
+keystone/0*                    active    idle       10.1.0.1
+placement-mysql-router/2       waiting   idle       10.1.0.2

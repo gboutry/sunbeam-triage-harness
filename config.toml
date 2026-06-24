@@ -1,0 +1,13 @@
+[swift]
+base_url = "https://radosgw.ps7.canonical.com/swift/v1/AUTH_86bac34f174b4ae59994bd51884a9c53/solutions-qa"
+timeout_seconds = 60
+
+[llm]
+base_url = "https://openrouter.ai/api/v1"
+model = "openrouter/auto"
+api_key_env = "OPENROUTER_API_KEY"
+timeout_seconds = 120
+
+[paths]
+artifact_root = "artifacts"
+output_pattern = "diagnostics-{uuid}.html"

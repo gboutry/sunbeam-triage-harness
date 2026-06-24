@@ -1,0 +1,2 @@
+NAMESPACE   NAME          READY   STATUS    RESTARTS   AGE
+openstack   keystone-0    2/2     Running   0          1h

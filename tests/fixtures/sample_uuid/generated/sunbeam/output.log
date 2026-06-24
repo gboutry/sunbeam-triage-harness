@@ -1,0 +1,7 @@
+2026-06-01 10:10:00,000 - DEBUG - [localhost]: ssh node-1 -- sunbeam cluster resize
+2026-06-01 11:10:00,000 - DEBUG - Error: wait timed out after 3599.9999993479996s
+2026-06-01 11:10:00,001 - ERROR - [localhost] Command failed: ssh node-1 -- sunbeam cluster resize
+2026-06-01 11:10:00,001 - ERROR - export OS_PASSWORD=super-secret-value
+2026-06-01 11:10:00,002 - ERROR - 1[localhost] STDOUT follows:
+wait timed out after 3599.9999993479996s
+2026-06-01 11:30:00,000 - ERROR - Failed to collect files from 0: command failed
