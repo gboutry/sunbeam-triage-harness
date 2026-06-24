@@ -30,24 +30,18 @@ class FakeHttp:
 def test_swift_mirror_downloads_all_objects_and_skips_unchanged(tmp_path):
     uuid = "abc-123"
     base = "https://swift.example/v1/AUTH/container"
-    listing_url = f"{base}/?prefix={uuid}/&format=json"
+    index_url = f"{base}/{uuid}/index.html"
     output_url = f"{base}/{uuid}/generated/sunbeam/output.log"
     jobs_url = f"{base}/{uuid}/generated/github-runner/jobs.json"
-    listing = [
-        {
-            "name": f"{uuid}/generated/sunbeam/output.log",
-            "hash": "5d41402abc4b2a76b9719d911017c592",
-            "bytes": 5,
-        },
-        {
-            "name": f"{uuid}/generated/github-runner/jobs.json",
-            "hash": "7d793037a0760186574b0282f2f435e7",
-            "bytes": 5,
-        },
-    ]
+    index = "\n".join(
+        [
+            '<a href="generated/sunbeam/output.log">generated/sunbeam/output.log</a><br>',
+            '<a href="generated/github-runner/jobs.json">generated/github-runner/jobs.json</a><br>',
+        ]
+    )
     http = FakeHttp(
         {
-            listing_url: json.dumps(listing),
+            index_url: index,
             output_url: b"hello",
             jobs_url: b"world",
         }
@@ -71,16 +65,10 @@ def test_swift_mirror_downloads_all_objects_and_skips_unchanged(tmp_path):
 def test_swift_mirror_reports_download_progress(tmp_path):
     uuid = "abc-123"
     base = "https://swift.example/v1/AUTH/container"
-    listing_url = f"{base}/?prefix={uuid}/&format=json"
+    index_url = f"{base}/{uuid}/index.html"
     output_url = f"{base}/{uuid}/generated/sunbeam/output.log"
-    listing = [
-        {
-            "name": f"{uuid}/generated/sunbeam/output.log",
-            "hash": "5d41402abc4b2a76b9719d911017c592",
-            "bytes": 5,
-        },
-    ]
-    http = FakeHttp({listing_url: json.dumps(listing), output_url: b"hello"})
+    index = '<a href="generated/sunbeam/output.log">generated/sunbeam/output.log</a><br>'
+    http = FakeHttp({index_url: index, output_url: b"hello"})
     config = Config.load(None)
     config.swift.base_url = base
     config.paths.artifact_root = tmp_path / "artifacts"
@@ -118,18 +106,12 @@ def test_swift_mirror_reports_download_progress(tmp_path):
 def test_swift_mirror_download_error_names_object_url_and_path(tmp_path):
     uuid = "abc-123"
     base = "https://swift.example/v1/AUTH/container"
-    listing_url = f"{base}/?prefix={uuid}/&format=json"
+    index_url = f"{base}/{uuid}/index.html"
     output_url = f"{base}/{uuid}/generated/sunbeam/output.log"
-    listing = [
-        {
-            "name": f"{uuid}/generated/sunbeam/output.log",
-            "hash": "5d41402abc4b2a76b9719d911017c592",
-            "bytes": 5,
-        },
-    ]
+    index = '<a href="generated/sunbeam/output.log">generated/sunbeam/output.log</a><br>'
     http = FakeHttp(
         {
-            listing_url: json.dumps(listing),
+            index_url: index,
             output_url: HTTPError(output_url, 404, "Not Found", {}, None),
         }
     )
@@ -153,24 +135,18 @@ def test_swift_mirror_download_error_names_object_url_and_path(tmp_path):
 def test_swift_mirror_can_continue_after_download_errors(tmp_path):
     uuid = "abc-123"
     base = "https://swift.example/v1/AUTH/container"
-    listing_url = f"{base}/?prefix={uuid}/&format=json"
+    index_url = f"{base}/{uuid}/index.html"
     missing_url = f"{base}/{uuid}/generated/sunbeam/missing.log"
     jobs_url = f"{base}/{uuid}/generated/github-runner/jobs.json"
-    listing = [
-        {
-            "name": f"{uuid}/generated/sunbeam/missing.log",
-            "hash": "5d41402abc4b2a76b9719d911017c592",
-            "bytes": 5,
-        },
-        {
-            "name": f"{uuid}/generated/github-runner/jobs.json",
-            "hash": "7d793037a0760186574b0282f2f435e7",
-            "bytes": 5,
-        },
-    ]
+    index = "\n".join(
+        [
+            '<a href="generated/sunbeam/missing.log">generated/sunbeam/missing.log</a><br>',
+            '<a href="generated/github-runner/jobs.json">generated/github-runner/jobs.json</a><br>',
+        ]
+    )
     http = FakeHttp(
         {
-            listing_url: json.dumps(listing),
+            index_url: index,
             missing_url: HTTPError(missing_url, 404, "Not Found", {}, None),
             jobs_url: b"world",
         }
@@ -203,10 +179,10 @@ def test_swift_mirror_can_continue_after_download_errors(tmp_path):
 def test_swift_mirror_raises_clear_error_for_missing_uuid(tmp_path):
     uuid = "missing"
     base = "https://swift.example/v1/AUTH/container"
-    listing_url = f"{base}/?prefix={uuid}/&format=json"
+    index_url = f"{base}/{uuid}/index.html"
     http = FakeHttp(
         {
-            listing_url: HTTPError(listing_url, 404, "Not Found", {}, None),
+            index_url: HTTPError(index_url, 404, "Not Found", {}, None),
         }
     )
 
@@ -219,3 +195,31 @@ def test_swift_mirror_raises_clear_error_for_missing_uuid(tmp_path):
         assert "No Swift artifacts found" in str(exc) or "404" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_swift_mirror_uses_index_html_links_and_ignores_unsafe_links(tmp_path):
+    uuid = "abc-123"
+    base = "https://swift.example/v1/AUTH/container"
+    index_url = f"{base}/{uuid}/index.html"
+    output_url = f"{base}/{uuid}/generated/sunbeam/output%20one.log"
+    index = "\n".join(
+        [
+            '<a href="generated/sunbeam/output%20one.log">output</a><br>',
+            '<a href="index.html">index.html</a><br>',
+            '<a href="../other/file.txt">bad</a><br>',
+            '<a href="/absolute/file.txt">bad</a><br>',
+            '<a href="https://example.com/file.txt">bad</a><br>',
+        ]
+    )
+    http = FakeHttp({index_url: index, output_url: b"hello"})
+    config = Config.load(None)
+    config.swift.base_url = base
+    config.paths.artifact_root = tmp_path / "artifacts"
+
+    manifest = SwiftMirror(config.swift, config.paths.artifact_root, http=http).mirror_uuid(uuid)
+
+    assert [obj.name for obj in manifest.objects] == [
+        f"{uuid}/generated/sunbeam/output one.log"
+    ]
+    assert (tmp_path / "artifacts" / uuid / "generated/sunbeam/output one.log").read_text() == "hello"
+    assert f"{base}/?prefix={uuid}/&format=json" not in http.urls

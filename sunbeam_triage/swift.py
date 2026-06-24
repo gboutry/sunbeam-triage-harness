@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from .config import SwiftConfig
 from .http import UrlLibHttp
@@ -150,14 +151,24 @@ class SwiftMirror:
         )
 
     def _list(self, uuid: str) -> list[dict]:
-        url = f"{self.swift_config.base_url}/?prefix={quote(uuid + '/')}&format=json"
-        return json.loads(self.http.get_text(url))
+        url = f"{self.swift_config.base_url}/{quote(uuid, safe='')}/index.html"
+        html = self.http.get_text(url)
+        return [
+            {
+                "name": f"{uuid}/{rel}",
+                "hash": None,
+                "bytes": -1,
+            }
+            for rel in _parse_index_links(html)
+        ]
 
     def _object_url(self, name: str) -> str:
         return f"{self.swift_config.base_url}/{quote(name, safe='/')}"
 
     @staticmethod
     def _is_unchanged(path: Path, obj: SwiftObject) -> bool:
+        if obj.bytes < 0:
+            return path.exists()
         if not path.exists() or path.stat().st_size != obj.bytes:
             return False
         if not obj.hash:
@@ -190,3 +201,39 @@ def _emit_progress(
     if error is not None:
         event["error"] = error
     progress(event)
+
+
+class _IndexLinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        for key, value in attrs:
+            if key.lower() == "href" and value:
+                self.hrefs.append(value)
+
+
+def _parse_index_links(html: str) -> list[str]:
+    parser = _IndexLinkParser()
+    parser.feed(html)
+    links: list[str] = []
+    seen: set[str] = set()
+    for href in parser.hrefs:
+        parts = urlsplit(href)
+        if parts.scheme or parts.netloc or href.startswith("/") or parts.query:
+            continue
+        rel = unquote(parts.path)
+        if not rel or rel == "index.html" or rel.endswith("/") or rel.startswith("../"):
+            continue
+        path = Path(rel)
+        if path.is_absolute() or ".." in path.parts:
+            continue
+        normalized = path.as_posix()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        links.append(normalized)
+    return links
