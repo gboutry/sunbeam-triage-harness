@@ -193,6 +193,7 @@ class OpenRouterClient:
                 artifact_root=artifact_root,
                 max_tool_rounds=max_tool_rounds,
                 max_tool_result_chars=max_tool_result_chars,
+                tool_choice="required",
             )
             data = _response_json(response)
         return DiagnosisReport.from_dict(data)
@@ -247,6 +248,7 @@ class OpenRouterClient:
         artifact_root: Path | None,
         max_tool_rounds: int,
         max_tool_result_chars: int,
+        tool_choice: str = "auto",
     ):
         if artifact_root is None:
             response = self._send(request)
@@ -256,7 +258,7 @@ class OpenRouterClient:
         request = {
             **request,
             "tools": artifact_tool_definitions(),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice,
             "parallel_tool_calls": False,
         }
         for _ in range(max_tool_rounds):

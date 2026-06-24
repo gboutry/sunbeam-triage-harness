@@ -462,6 +462,8 @@ def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_to
     assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
     assert report.needs_more_evidence is False
     assert len(sdk.chat.calls) == 3
+    assert sdk.chat.calls[0]["tool_choice"] == "auto"
+    assert sdk.chat.calls[1]["tool_choice"] == "required"
     retry_message = sdk.chat.calls[1]["messages"][-1]["content"]
     assert "use the artifact tools" in retry_message
     assert "Do not answer yet" in retry_message
