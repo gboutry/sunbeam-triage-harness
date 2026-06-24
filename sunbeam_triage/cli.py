@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         report = OpenRouterClient(config.llm).diagnose(
             pack.to_prompt_text(),
             session_id=uuid,
+            artifact_root=artifact_root,
         )
     _log("result", f"confidence={report.confidence} summary={report.summary}")
 

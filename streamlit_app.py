@@ -165,6 +165,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
             report = llm_client.diagnose(
                 pack.to_prompt_text(),
                 session_id=uuid,
+                artifact_root=artifact_root,
             )
 
             output = run_config.output_path(uuid)
@@ -273,7 +274,12 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
         if item.get("role") in {"user", "assistant"}
     ]
     messages = [*history, {"role": "user", "content": prompt}]
-    answer = llm_client.chat(context, messages, session_id=session["uuid"])
+    answer = llm_client.chat(
+        context,
+        messages,
+        session_id=session["uuid"],
+        artifact_root=Path(session["artifact_root"]),
+    )
 
     session.setdefault("chat", []).extend(
         [

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from openrouter import OpenRouter
 
+from .artifact_tools import artifact_tool_definitions, execute_artifact_tool
 from .config import LlmConfig
 
 
@@ -137,6 +139,8 @@ class OpenRouterClient:
         evidence_text: str,
         *,
         session_id: str | None = None,
+        artifact_root: Path | None = None,
+        max_tool_rounds: int = 4,
     ) -> DiagnosisReport:
         request = {
             "model": self.config.model,
@@ -145,7 +149,10 @@ class OpenRouterClient:
                     "role": "system",
                     "content": (
                         "You are a CI failure diagnostician. Use only the provided "
-                        "evidence. Do not invent files, timestamps, or causes."
+                        "evidence. Do not invent files, timestamps, or causes. "
+                        "If more log context is needed, list artifact files first. "
+                        "Read a specific file only when it is likely to materially "
+                        "improve the diagnosis, because file reads can be costly."
                     ),
                 },
                 {"role": "user", "content": evidence_text},
@@ -155,8 +162,11 @@ class OpenRouterClient:
         if session_id:
             request["session_id"] = session_id
         request.update(_cache_kwargs(self.config.model))
-        response = self._send(request)
-        self._record_exchange(request, response)
+        response = self._send_with_artifact_tools(
+            request,
+            artifact_root=artifact_root,
+            max_tool_rounds=max_tool_rounds,
+        )
         content = _response_content(response)
         try:
             data = json.loads(content)
@@ -170,6 +180,8 @@ class OpenRouterClient:
         messages: list[dict[str, str]],
         *,
         session_id: str | None = None,
+        artifact_root: Path | None = None,
+        max_tool_rounds: int = 4,
     ) -> str:
         request = {
             "model": self.config.model,
@@ -179,7 +191,10 @@ class OpenRouterClient:
                     "content": (
                         "You are continuing a Sunbeam CI failure diagnosis. "
                         "Use the provided diagnosis context and evidence. "
-                        "Separate evidence from inference."
+                        "Separate evidence from inference. If more log context "
+                        "is needed, list artifact files first. Read a specific "
+                        "file only when it is likely to materially improve the "
+                        "answer, because file reads can be costly."
                     ),
                 },
                 {"role": "user", "content": context_text},
@@ -189,9 +204,50 @@ class OpenRouterClient:
         if session_id:
             request["session_id"] = session_id
         request.update(_cache_kwargs(self.config.model))
-        response = self._send(request)
-        self._record_exchange(request, response)
+        response = self._send_with_artifact_tools(
+            request,
+            artifact_root=artifact_root,
+            max_tool_rounds=max_tool_rounds,
+        )
         return _response_content(response)
+
+    def _send_with_artifact_tools(
+        self,
+        request: dict[str, Any],
+        *,
+        artifact_root: Path | None,
+        max_tool_rounds: int,
+    ):
+        if artifact_root is None:
+            response = self._send(request)
+            self._record_exchange(request, response)
+            return response
+
+        request = {
+            **request,
+            "tools": artifact_tool_definitions(),
+            "tool_choice": "auto",
+            "parallel_tool_calls": False,
+        }
+        for _ in range(max_tool_rounds):
+            response = self._send(request)
+            self._record_exchange(request, response)
+            tool_calls = _tool_calls(response)
+            if not tool_calls:
+                return response
+            request["messages"] = [
+                *request["messages"],
+                _assistant_tool_message(response),
+                *[
+                    _tool_result_message(artifact_root, tool_call)
+                    for tool_call in tool_calls
+                ],
+            ]
+
+        final_request = _final_request_without_artifact_tools(request)
+        response = self._send(final_request)
+        self._record_exchange(final_request, response)
+        return response
 
     def _send(self, request: dict[str, Any]):
         return self._sdk().chat.send(**request)
@@ -214,15 +270,30 @@ class OpenRouterClient:
         visible_request = {
             key: value
             for key, value in request.items()
-            if key in {"model", "messages", "session_id", "cache_control"}
+            if key
+            in {
+                "model",
+                "messages",
+                "session_id",
+                "cache_control",
+                "tools",
+                "tool_choice",
+                "parallel_tool_calls",
+            }
         }
+        visible_response = {
+            "content": _response_content(response),
+            "usage": _usage_dict(getattr(response, "usage", None)),
+        }
+        tool_calls = _tool_calls(response)
+        if tool_calls:
+            visible_response["tool_calls"] = [
+                _tool_call_dict(call) for call in tool_calls
+            ]
         self.exchanges.append(
             {
-                "request": visible_request,
-                "response": {
-                    "content": _response_content(response),
-                    "usage": _usage_dict(getattr(response, "usage", None)),
-                },
+                "request": _json_safe(visible_request),
+                "response": _json_safe(visible_response),
             }
         )
 
@@ -236,7 +307,94 @@ def _cache_kwargs(model: str) -> dict[str, Any]:
 def _response_content(response: Any) -> str:
     choice = response.choices[0]
     message = choice.message
+    if message.content is None:
+        return ""
     return str(message.content)
+
+
+def _tool_calls(response: Any) -> list[Any]:
+    choice = response.choices[0]
+    message = choice.message
+    return list(getattr(message, "tool_calls", None) or [])
+
+
+def _assistant_tool_message(response: Any) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": _response_content(response),
+        "tool_calls": [_tool_call_dict(call) for call in _tool_calls(response)],
+    }
+
+
+def _tool_result_message(root: Path, tool_call: Any) -> dict[str, Any]:
+    name, arguments = _tool_call_name_and_arguments(tool_call)
+    result = execute_artifact_tool(root, name, arguments)
+    return {
+        "role": "tool",
+        "tool_call_id": _tool_call_id(tool_call),
+        "content": json.dumps(result, sort_keys=True),
+    }
+
+
+def _final_request_without_artifact_tools(request: dict[str, Any]) -> dict[str, Any]:
+    final_request = {
+        key: value
+        for key, value in request.items()
+        if key not in {"tools", "tool_choice", "parallel_tool_calls"}
+    }
+    final_request["messages"] = [
+        *final_request["messages"],
+        {
+            "role": "user",
+            "content": (
+                "The artifact tool budget is exhausted. Answer now using the "
+                "initial evidence and any artifact tool results already "
+                "provided. Do not request more files."
+            ),
+        },
+    ]
+    return final_request
+
+
+def _tool_call_dict(tool_call: Any) -> dict[str, Any]:
+    name, arguments = _tool_call_name_and_arguments(tool_call)
+    return {
+        "id": _tool_call_id(tool_call),
+        "type": _tool_call_type(tool_call),
+        "function": {
+            "name": name,
+            "arguments": json.dumps(arguments, sort_keys=True),
+        },
+    }
+
+
+def _tool_call_name_and_arguments(tool_call: Any) -> tuple[str, dict[str, Any]]:
+    function = _get_value(tool_call, "function", {})
+    name = str(_get_value(function, "name", ""))
+    raw_arguments = _get_value(function, "arguments", "{}")
+    if isinstance(raw_arguments, dict):
+        return name, raw_arguments
+    try:
+        parsed = json.loads(str(raw_arguments or "{}"))
+    except json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    return name, parsed
+
+
+def _tool_call_id(tool_call: Any) -> str:
+    return str(_get_value(tool_call, "id", ""))
+
+
+def _tool_call_type(tool_call: Any) -> str:
+    return str(_get_value(tool_call, "type", "function"))
+
+
+def _get_value(item: Any, name: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(name, default)
+    return getattr(item, name, default)
 
 
 def _usage_dict(usage: Any) -> dict[str, Any]:
@@ -251,5 +409,26 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         "cache_write_tokens",
     ):
         if hasattr(usage, name):
-            data[name] = getattr(usage, name)
+            data[name] = _json_safe(getattr(usage, name))
     return data
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump())
+    if hasattr(value, "to_dict"):
+        return _json_safe(value.to_dict())
+    attrs = getattr(value, "__dict__", None)
+    if isinstance(attrs, dict):
+        return {
+            key: _json_safe(item)
+            for key, item in attrs.items()
+            if not key.startswith("_")
+        }
+    return str(value)
