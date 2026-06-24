@@ -551,6 +551,85 @@ def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):
     assert len(sdk.chat.calls) == 2
 
 
+def test_openrouter_client_downgrades_confirmed_diagnosis_after_tool_budget_fallback(
+    tmp_path,
+):
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
+            ),
+            FakeSdkResponse(
+                json.dumps(
+                    {
+                        "summary": "The join timed out waiting for k8s.",
+                        "failure_surface": "sunbeam cluster join timed out.",
+                        "confidence": "confirmed",
+                        "root_cause": "The orchestrator agent was lost.",
+                        "needs_more_evidence": False,
+                        "evidence": [],
+                        "candidate_mechanisms": [
+                            {
+                                "name": "orchestrator agent lost",
+                                "status": "confirmed",
+                                "rationale": "Status showed the unit lost.",
+                            }
+                        ],
+                        "recommendations": ["Inspect the sosreport."],
+                        "unknowns": [],
+                    }
+                )
+            ),
+        ]
+    )
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=tmp_path,
+        max_tool_rounds=1,
+    )
+
+    assert report.confidence == "supported"
+    assert report.needs_more_evidence is True
+    assert report.candidate_mechanisms[0].status == "supported"
+    assert any("tool budget" in unknown for unknown in report.unknowns)
+
+
+def test_openrouter_client_nudges_targeted_read_after_broad_tool_only_round(
+    tmp_path,
+):
+    log = tmp_path / "generated/sunbeam/output.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("wait timed out\n", encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "search_artifacts",
+                        json.dumps({"pattern": "wait timed out"}),
+                    )
+                ],
+            ),
+            FakeSdkResponse("The timeout is visible."),
+        ]
+    )
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=tmp_path,
+    )
+
+    followup_messages = sdk.chat.calls[1]["messages"]
+    assert followup_messages[-1]["role"] == "user"
+    assert "targeted read" in followup_messages[-1]["content"]
+    assert "get_artifact_file" in followup_messages[-1]["content"]
+
+
 def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
     artifact_root = tmp_path / "uuid"
     archive = artifact_root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"

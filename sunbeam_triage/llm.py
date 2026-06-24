@@ -182,6 +182,8 @@ class OpenRouterClient:
             max_tool_result_chars=max_tool_result_chars,
         )
         data = _response_json(response)
+        if _exchange_range_has_tool_budget_fallback(self.exchanges, exchange_start):
+            data = _downgrade_tool_budget_diagnosis(data)
         if (
             data.get("needs_more_evidence") is True
             and artifact_root is not None
@@ -196,6 +198,11 @@ class OpenRouterClient:
                 tool_choice="required",
             )
             data = _response_json(response)
+            if _exchange_range_has_tool_budget_fallback(
+                self.exchanges,
+                exchange_start,
+            ):
+                data = _downgrade_tool_budget_diagnosis(data)
         return DiagnosisReport.from_dict(data)
 
     def chat(
@@ -276,6 +283,8 @@ class OpenRouterClient:
                     max_chars=max_tool_result_chars,
                 ),
             ]
+            if _tool_calls_need_targeted_read_nudge(tool_calls):
+                request["messages"].append(_targeted_read_nudge_message())
 
         final_request = _final_request_without_artifact_tools(request)
         response = self._send(final_request)
@@ -367,6 +376,50 @@ def _exchange_range_has_tool_calls(
     return False
 
 
+def _exchange_range_has_tool_budget_fallback(
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    for exchange in exchanges[start_index:]:
+        request = exchange.get("request", {})
+        if not isinstance(request, dict):
+            continue
+        if "tools" in request:
+            continue
+        for message in request.get("messages", []):
+            if not isinstance(message, dict):
+                continue
+            content = str(message.get("content", ""))
+            if "artifact tool budget is exhausted" in content:
+                return True
+    return False
+
+
+def _downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
+    downgraded = dict(data)
+    if downgraded.get("confidence") == "confirmed":
+        downgraded["confidence"] = "supported"
+    downgraded["needs_more_evidence"] = True
+    unknowns = [str(item) for item in downgraded.get("unknowns", []) if item is not None]
+    budget_unknown = (
+        "The artifact tool budget was exhausted before targeted artifact reads "
+        "could fully validate the mechanism."
+    )
+    if budget_unknown not in unknowns:
+        unknowns.append(budget_unknown)
+    downgraded["unknowns"] = unknowns
+    mechanisms = []
+    for item in downgraded.get("candidate_mechanisms", []):
+        if not isinstance(item, dict):
+            continue
+        mechanism = dict(item)
+        if mechanism.get("status") == "confirmed":
+            mechanism["status"] = "supported"
+        mechanisms.append(mechanism)
+    downgraded["candidate_mechanisms"] = mechanisms
+    return downgraded
+
+
 def _request_with_evidence_retry(
     request: dict[str, Any],
     response: Any,
@@ -387,6 +440,27 @@ def _request_with_evidence_retry(
                 ),
             },
         ],
+    }
+
+
+def _tool_calls_need_targeted_read_nudge(tool_calls: list[Any]) -> bool:
+    names = {_tool_call_name_and_arguments(call)[0] for call in tool_calls}
+    broad_tools = {"list_artifact_files", "list_sosreports", "search_artifacts"}
+    targeted_tools = {"get_artifact_file", "search_sosreport", "get_sosreport_file"}
+    return bool(names & broad_tools) and not bool(names & targeted_tools)
+
+
+def _targeted_read_nudge_message() -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": (
+            "The previous tool round only discovered candidate artifacts or "
+            "broad matches. If the evidence is still insufficient, make the "
+            "next tool call a targeted read or targeted archive search, such "
+            "as get_artifact_file, search_sosreport, or get_sosreport_file. "
+            "If no targeted read is justified, keep the final diagnosis "
+            "conservative and leave needs_more_evidence=true."
+        ),
     }
 
 
@@ -497,7 +571,10 @@ def _final_request_without_artifact_tools(request: dict[str, Any]) -> dict[str, 
             "content": (
                 "The artifact tool budget is exhausted. Answer now using the "
                 "initial evidence and any artifact tool results already "
-                "provided. Do not request more files."
+                "provided. Do not request more files. Do not mark a diagnosis "
+                "confirmed solely from discovery-only tool results; preserve "
+                "uncertainty when targeted files or sosreport members were not "
+                "read."
             ),
         },
     ]
