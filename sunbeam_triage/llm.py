@@ -4,8 +4,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from openrouter import OpenRouter
+
 from .config import LlmConfig
-from .http import UrlLibHttp
 
 
 @dataclass(frozen=True)
@@ -126,16 +127,18 @@ REPORT_SCHEMA = {
 
 
 class OpenRouterClient:
-    def __init__(self, config: LlmConfig, http=None):
+    def __init__(self, config: LlmConfig, sdk_client=None):
         self.config = config
-        self.http = http or UrlLibHttp(timeout=config.timeout_seconds)
+        self.sdk_client = sdk_client
+        self.exchanges: list[dict[str, Any]] = []
 
-    def diagnose(self, evidence_text: str) -> DiagnosisReport:
-        if not self.config.api_key:
-            raise RuntimeError(
-                f"Missing OpenRouter API key. Set {self.config.api_key_env}."
-            )
-        payload = {
+    def diagnose(
+        self,
+        evidence_text: str,
+        *,
+        session_id: str | None = None,
+    ) -> DiagnosisReport:
+        request = {
             "model": self.config.model,
             "messages": [
                 {
@@ -149,24 +152,26 @@ class OpenRouterClient:
             ],
             "response_format": {"type": "json_schema", "json_schema": REPORT_SCHEMA},
         }
-        response = self.http.post_json(
-            f"{self.config.base_url}/chat/completions",
-            payload,
-            headers={"Authorization": f"Bearer {self.config.api_key}"},
-        )
-        content = response["choices"][0]["message"]["content"]
+        if session_id:
+            request["session_id"] = session_id
+        request.update(_cache_kwargs(self.config.model))
+        response = self._send(request)
+        self._record_exchange(request, response)
+        content = _response_content(response)
         try:
             data = json.loads(content)
         except json.JSONDecodeError as exc:
             raise RuntimeError("LLM response was not valid JSON") from exc
         return DiagnosisReport.from_dict(data)
 
-    def chat(self, context_text: str, messages: list[dict[str, str]]) -> str:
-        if not self.config.api_key:
-            raise RuntimeError(
-                f"Missing OpenRouter API key. Set {self.config.api_key_env}."
-            )
-        payload = {
+    def chat(
+        self,
+        context_text: str,
+        messages: list[dict[str, str]],
+        *,
+        session_id: str | None = None,
+    ) -> str:
+        request = {
             "model": self.config.model,
             "messages": [
                 {
@@ -181,9 +186,70 @@ class OpenRouterClient:
                 *messages,
             ],
         }
-        response = self.http.post_json(
-            f"{self.config.base_url}/chat/completions",
-            payload,
-            headers={"Authorization": f"Bearer {self.config.api_key}"},
+        if session_id:
+            request["session_id"] = session_id
+        request.update(_cache_kwargs(self.config.model))
+        response = self._send(request)
+        self._record_exchange(request, response)
+        return _response_content(response)
+
+    def _send(self, request: dict[str, Any]):
+        return self._sdk().chat.send(**request)
+
+    def _sdk(self):
+        if self.sdk_client is not None:
+            return self.sdk_client
+        if not self.config.api_key:
+            raise RuntimeError(
+                f"Missing OpenRouter API key. Set {self.config.api_key_env}."
+            )
+        self.sdk_client = OpenRouter(
+            api_key=self.config.api_key,
+            server_url=self.config.base_url,
+            timeout_ms=self.config.timeout_seconds * 1000,
         )
-        return str(response["choices"][0]["message"]["content"])
+        return self.sdk_client
+
+    def _record_exchange(self, request: dict[str, Any], response: Any) -> None:
+        visible_request = {
+            key: value
+            for key, value in request.items()
+            if key in {"model", "messages", "session_id", "cache_control"}
+        }
+        self.exchanges.append(
+            {
+                "request": visible_request,
+                "response": {
+                    "content": _response_content(response),
+                    "usage": _usage_dict(getattr(response, "usage", None)),
+                },
+            }
+        )
+
+
+def _cache_kwargs(model: str) -> dict[str, Any]:
+    if model.startswith("anthropic/"):
+        return {"cache_control": {"type": "ephemeral"}}
+    return {}
+
+
+def _response_content(response: Any) -> str:
+    choice = response.choices[0]
+    message = choice.message
+    return str(message.content)
+
+
+def _usage_dict(usage: Any) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    data: dict[str, Any] = {}
+    for name in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "prompt_tokens_details",
+        "cache_write_tokens",
+    ):
+        if hasattr(usage, name):
+            data[name] = getattr(usage, name)
+    return data

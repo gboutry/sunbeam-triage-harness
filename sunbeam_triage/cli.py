@@ -65,7 +65,10 @@ def main(argv: list[str] | None = None) -> int:
         report = DiagnosisReport.from_dict(json.loads(args.llm_json))
     else:
         _log("stage", f"diagnosis requesting model={config.llm.model}")
-        report = OpenRouterClient(config.llm).diagnose(pack.to_prompt_text())
+        report = OpenRouterClient(config.llm).diagnose(
+            pack.to_prompt_text(),
+            session_id=uuid,
+        )
     _log("result", f"confidence={report.confidence} summary={report.summary}")
 
     output = config.output_path(uuid)

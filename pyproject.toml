@@ -9,6 +9,7 @@ description = "Sunbeam CI failure triage harness and Streamlit cockpit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "openrouter>=0.10.0",
     "streamlit",
 ]
 

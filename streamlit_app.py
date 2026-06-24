@@ -9,12 +9,10 @@ import streamlit as st
 
 from sunbeam_triage.config import Config
 from sunbeam_triage.evidence import EvidenceCollector
-from sunbeam_triage.http import UrlLibHttp
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
 from sunbeam_triage.render import render_html
 from sunbeam_triage.swift import SwiftMirror
 from sunbeam_triage.ui_helpers import (
-    CapturingHttp,
     build_followup_context,
     evidence_line_map,
     list_artifact_files,
@@ -115,7 +113,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
 
     run_config = Config.load("config.toml", cli_model=model)
     artifact_root = run_config.paths.artifact_root / uuid
-    capture = CapturingHttp(UrlLibHttp(timeout=run_config.llm.timeout_seconds))
+    llm_client = OpenRouterClient(run_config.llm)
 
     with st.status(f"Diagnosing {uuid}", expanded=True) as status:
         download_failures: list[dict[str, Any]] = []
@@ -164,8 +162,9 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
             pack = EvidenceCollector(artifact_root, uuid).collect()
 
             st.write(f"Querying {run_config.llm.model}")
-            report = OpenRouterClient(run_config.llm, http=capture).diagnose(
-                pack.to_prompt_text()
+            report = llm_client.diagnose(
+                pack.to_prompt_text(),
+                session_id=uuid,
             )
 
             output = run_config.output_path(uuid)
@@ -181,7 +180,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
                     output=output,
                     failed_step=pack.failed_step.name,
                     report=report,
-                    exchanges=capture.exchanges,
+                    exchanges=llm_client.exchanges,
                     download_failures=download_failures,
                 ),
             )
@@ -201,7 +200,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
                     "artifact_root": str(artifact_root),
                     "error": str(exc),
                     "chat": [],
-                    "exchanges": capture.exchanges,
+                    "exchanges": llm_client.exchanges,
                     "download_failures": download_failures,
                 },
             )
@@ -267,14 +266,14 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
         attachments=st.session_state.get("pending_attachments", []),
     )
     run_config = Config.load("config.toml", cli_model=session["model"])
-    capture = CapturingHttp(UrlLibHttp(timeout=run_config.llm.timeout_seconds))
+    llm_client = OpenRouterClient(run_config.llm)
     history = [
         {"role": item["role"], "content": item["content"]}
         for item in session.get("chat", [])
         if item.get("role") in {"user", "assistant"}
     ]
     messages = [*history, {"role": "user", "content": prompt}]
-    answer = OpenRouterClient(run_config.llm, http=capture).chat(context, messages)
+    answer = llm_client.chat(context, messages, session_id=session["uuid"])
 
     session.setdefault("chat", []).extend(
         [
@@ -282,7 +281,7 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
             {"role": "assistant", "content": answer, "created_at": _now()},
         ]
     )
-    session.setdefault("exchanges", []).extend(capture.exchanges)
+    session.setdefault("exchanges", []).extend(llm_client.exchanges)
     session["updated_at"] = _now()
     save_ui_session(config.paths.artifact_root, session)
     st.session_state["pending_attachments"] = []
