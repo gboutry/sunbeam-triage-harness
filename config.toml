@@ -4,7 +4,8 @@ timeout_seconds = 60
 
 [llm]
 base_url = "https://openrouter.ai/api/v1"
-model = "openrouter/auto"
+# model = "openrouter/auto"
+model = "deepseek/deepseek-v4-pro:floor"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 120
 
