@@ -1,3 +1,4 @@
+import importlib.util
 from pathlib import Path
 
 from sunbeam_triage.evidence import EvidenceCollector
@@ -9,6 +10,18 @@ from sunbeam_triage.ui_helpers import (
     save_ui_session,
     session_store_root,
 )
+
+
+def _streamlit_app():
+    spec = importlib.util.spec_from_file_location(
+        "streamlit_app_for_tests",
+        Path("streamlit_app.py"),
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_session_store_round_trips_and_lists_recent_first(tmp_path):
@@ -94,3 +107,29 @@ def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
     assert "Model Evidence:" in context
     assert "generated/sunbeam/output.log:2: wait timed out" in context
     assert "Attached Context:" in context
+
+
+def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
+    app = _streamlit_app()
+    report = DiagnosisReport(
+        summary="Incomplete",
+        failure_surface="Wrapper failure",
+        confidence="unknown",
+        root_cause="",
+        needs_more_evidence=True,
+    )
+
+    session = app._session_from_diagnosis(
+        uuid="uuid",
+        model="model/a",
+        artifact_root=tmp_path / "uuid",
+        output=tmp_path / "diagnostics.html",
+        failed_step="sunbeam_test",
+        report=report,
+        exchanges=[],
+        download_failures=[],
+    )
+
+    assert session["needs_more_evidence"] is True
+    assert app._report_from_session(session).needs_more_evidence is True
+    assert app._report_from_session({"summary": "old"}).needs_more_evidence is False

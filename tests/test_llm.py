@@ -3,7 +3,7 @@ import json
 import tarfile
 
 from sunbeam_triage.config import Config
-from sunbeam_triage.llm import OpenRouterClient
+from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
 
 
 class FakeSdkResponse:
@@ -117,6 +117,26 @@ def test_openrouter_client_requests_structured_diagnosis_with_sdk():
     assert call["messages"][1] == {"role": "user", "content": "evidence text"}
     assert report.summary == "The deploy step timed out."
     assert report.evidence[0].line == 2
+
+
+def test_diagnosis_report_defaults_needs_more_evidence_for_old_payloads():
+    report = DiagnosisReport.from_dict(
+        {
+            "summary": "summary",
+            "failure_surface": "surface",
+            "confidence": "supported",
+            "root_cause": "cause",
+        }
+    )
+
+    assert report.needs_more_evidence is False
+
+
+def test_report_schema_requires_needs_more_evidence():
+    assert "needs_more_evidence" in REPORT_SCHEMA["schema"]["required"]
+    assert REPORT_SCHEMA["schema"]["properties"]["needs_more_evidence"] == {
+        "type": "boolean"
+    }
 
 
 def test_openrouter_client_sends_follow_up_chat_with_sdk_session_id():
@@ -379,6 +399,142 @@ def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
     ]
     assert sum(len(message["content"]) for message in tool_messages) <= 260
     assert json.loads(tool_messages[-1]["content"])["tool_result_truncated_by_budget"] is True
+
+
+def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_tools(
+    tmp_path,
+):
+    artifact_root = tmp_path / "uuid"
+    log = artifact_root / "generated/sunbeam/validation_refstack.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("Details: Unexpected status code 502\n", encoding="utf-8")
+    incomplete = {
+        "summary": "The refstack command failed.",
+        "failure_surface": "sunbeam validation run refstack exited 1.",
+        "confidence": "unknown",
+        "root_cause": "",
+        "needs_more_evidence": True,
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": ["Examine the validation_refstack log."],
+        "unknowns": ["What specific tests failed?"],
+    }
+    complete = {
+        "summary": "Refstack failed while authenticating for volume tests.",
+        "failure_surface": "One Tempest volume test class failed during setup.",
+        "confidence": "supported",
+        "root_cause": "Keystone returned HTTP 502 during Tempest auth.",
+        "needs_more_evidence": False,
+        "evidence": [
+            {
+                "path": "generated/sunbeam/validation_refstack.log",
+                "line": 1,
+                "excerpt": "Details: Unexpected status code 502",
+            }
+        ],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(json.dumps(incomplete)),
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "search_artifacts",
+                        json.dumps({"pattern": "Unexpected status code 502"}),
+                    )
+                ],
+            ),
+            FakeSdkResponse(json.dumps(complete)),
+        ]
+    )
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        session_id="uuid",
+        artifact_root=artifact_root,
+    )
+
+    assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
+    assert report.needs_more_evidence is False
+    assert len(sdk.chat.calls) == 3
+    retry_message = sdk.chat.calls[1]["messages"][-1]["content"]
+    assert "use the artifact tools" in retry_message
+    assert "Do not answer yet" in retry_message
+
+
+def test_openrouter_client_does_not_retry_concrete_no_tool_diagnosis(tmp_path):
+    response = {
+        "summary": "Refstack failed.",
+        "failure_surface": "refstack exited 1.",
+        "confidence": "supported",
+        "root_cause": "Keystone returned HTTP 502 during Tempest auth.",
+        "needs_more_evidence": False,
+        "evidence": [
+            {
+                "path": "generated/sunbeam/validation_refstack.log",
+                "line": 1,
+                "excerpt": "Details: Unexpected status code 502",
+            }
+        ],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient(FakeSdkResponse(json.dumps(response)))
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=tmp_path,
+    )
+
+    assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
+    assert len(sdk.chat.calls) == 1
+
+
+def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    log = artifact_root / "generated/sunbeam/validation_refstack.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("Details: Unexpected status code 502\n", encoding="utf-8")
+    response = {
+        "summary": "The refstack command failed.",
+        "failure_surface": "sunbeam validation run refstack exited 1.",
+        "confidence": "unknown",
+        "root_cause": "",
+        "needs_more_evidence": True,
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": ["Review service logs manually."],
+        "unknowns": ["No decisive service-side cause found."],
+    }
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "search_artifacts",
+                        json.dumps({"pattern": "Unexpected status code 502"}),
+                    )
+                ],
+            ),
+            FakeSdkResponse(json.dumps(response)),
+        ]
+    )
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=artifact_root,
+    )
+
+    assert report.needs_more_evidence is True
+    assert len(sdk.chat.calls) == 2
 
 
 def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):

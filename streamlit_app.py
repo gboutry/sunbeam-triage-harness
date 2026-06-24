@@ -101,7 +101,7 @@ def _sidebar(config: Config) -> str:
 
         for item in sessions:
             label = f"{item['uuid']}\n\n{item['confidence']} · {item['model']}"
-            if st.button(label, key=f"history-{item['uuid']}", use_container_width=True):
+            if st.button(label, key=f"history-{item['uuid']}", width="stretch"):
                 st.session_state["selected_uuid"] = item["uuid"]
 
     return st.session_state.get("selected_uuid", "")
@@ -416,6 +416,7 @@ def _session_from_diagnosis(
         "failure_surface": report.failure_surface,
         "confidence": report.confidence,
         "root_cause": report.root_cause,
+        "needs_more_evidence": report.needs_more_evidence,
         "failed_step": failed_step,
         "updated_at": _now(),
         "artifact_root": str(artifact_root),
@@ -437,6 +438,7 @@ def _report_from_session(session: dict[str, Any]) -> DiagnosisReport:
             "failure_surface": session.get("failure_surface", ""),
             "confidence": session.get("confidence", "unknown"),
             "root_cause": session.get("root_cause", ""),
+            "needs_more_evidence": session.get("needs_more_evidence", False),
             "evidence": session.get("evidence", []),
             "candidate_mechanisms": session.get("candidate_mechanisms", []),
             "recommendations": session.get("recommendations", []),

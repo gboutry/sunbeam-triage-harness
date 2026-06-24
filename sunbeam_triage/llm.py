@@ -31,6 +31,7 @@ class DiagnosisReport:
     failure_surface: str
     confidence: str
     root_cause: str
+    needs_more_evidence: bool = False
     evidence: list[ReportEvidence] = field(default_factory=list)
     candidate_mechanisms: list[CandidateMechanism] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
@@ -43,6 +44,7 @@ class DiagnosisReport:
             failure_surface=str(data.get("failure_surface", "")),
             confidence=str(data.get("confidence", "speculative")),
             root_cause=str(data.get("root_cause", "")),
+            needs_more_evidence=bool(data.get("needs_more_evidence", False)),
             evidence=[
                 ReportEvidence(
                     path=str(item.get("path", "")),
@@ -79,6 +81,7 @@ REPORT_SCHEMA = {
             "failure_surface",
             "confidence",
             "root_cause",
+            "needs_more_evidence",
             "evidence",
             "candidate_mechanisms",
             "recommendations",
@@ -92,6 +95,7 @@ REPORT_SCHEMA = {
                 "enum": ["confirmed", "supported", "speculative", "unknown"],
             },
             "root_cause": {"type": "string"},
+            "needs_more_evidence": {"type": "boolean"},
             "evidence": {
                 "type": "array",
                 "items": {
@@ -151,13 +155,16 @@ class OpenRouterClient:
                     "content": (
                         "You are a CI failure diagnostician. Use only the provided "
                         "evidence. Do not invent files, timestamps, or causes. "
-                        "If more log context is needed, list artifact files first "
-                        "and search artifacts before reading whole files. For "
-                        "sosreport archives, search inside the archive before "
-                        "reading a specific member. Prefer line windows over full "
-                        "file reads. "
-                        "Read a specific file only when it is likely to materially "
-                        "improve the diagnosis, because file reads can be costly."
+                        "Actively inspect the next likely decisive artifact when "
+                        "the current evidence only identifies a wrapper failure. "
+                        "Use search_artifacts before reading whole files. For "
+                        "sosreport archives, use search_sosreport before reading "
+                        "a specific member. Prefer line windows over full file "
+                        "reads. Read a specific file only when it is likely to "
+                        "materially improve the diagnosis, because file reads can "
+                        "be costly. Set needs_more_evidence to true only when a "
+                        "likely decisive artifact remains uninspected; if tools "
+                        "are available, use them before finalizing that response."
                     ),
                 },
                 {"role": "user", "content": evidence_text},
@@ -167,17 +174,27 @@ class OpenRouterClient:
         if session_id:
             request["session_id"] = session_id
         request.update(_cache_kwargs(self.config.model))
+        exchange_start = len(self.exchanges)
         response = self._send_with_artifact_tools(
             request,
             artifact_root=artifact_root,
             max_tool_rounds=max_tool_rounds,
             max_tool_result_chars=max_tool_result_chars,
         )
-        content = _response_content(response)
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("LLM response was not valid JSON") from exc
+        data = _response_json(response)
+        if (
+            data.get("needs_more_evidence") is True
+            and artifact_root is not None
+            and not _exchange_range_has_tool_calls(self.exchanges, exchange_start)
+        ):
+            retry_request = _request_with_evidence_retry(request, response)
+            response = self._send_with_artifact_tools(
+                retry_request,
+                artifact_root=artifact_root,
+                max_tool_rounds=max_tool_rounds,
+                max_tool_result_chars=max_tool_result_chars,
+            )
+            data = _response_json(response)
         return DiagnosisReport.from_dict(data)
 
     def chat(
@@ -198,13 +215,14 @@ class OpenRouterClient:
                     "content": (
                         "You are continuing a Sunbeam CI failure diagnosis. "
                         "Use the provided diagnosis context and evidence. "
-                        "Separate evidence from inference. If more log context "
-                        "is needed, list artifact files first and search artifacts "
-                        "before reading whole files. For sosreport archives, search "
-                        "inside the archive before reading a specific member. "
-                        "Prefer line windows over full file reads. Read a specific "
-                        "file only when it is likely to materially improve the "
-                        "answer, because file reads can be costly."
+                        "Separate evidence from inference. Actively inspect the "
+                        "next likely decisive artifact when the current context "
+                        "only identifies a wrapper failure. Use search_artifacts "
+                        "before reading whole files. For sosreport archives, use "
+                        "search_sosreport before reading a specific member. "
+                        "Prefer line windows over full file reads. Read a "
+                        "specific file only when it is likely to materially "
+                        "improve the answer, because file reads can be costly."
                     ),
                 },
                 {"role": "user", "content": context_text},
@@ -323,6 +341,51 @@ def _response_content(response: Any) -> str:
     if message.content is None:
         return ""
     return str(message.content)
+
+
+def _response_json(response: Any) -> dict[str, Any]:
+    content = _response_content(response)
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("LLM response was not valid JSON") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("LLM response JSON was not an object")
+    return data
+
+
+def _exchange_range_has_tool_calls(
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    for exchange in exchanges[start_index:]:
+        response = exchange.get("response", {})
+        if isinstance(response, dict) and response.get("tool_calls"):
+            return True
+    return False
+
+
+def _request_with_evidence_retry(
+    request: dict[str, Any],
+    response: Any,
+) -> dict[str, Any]:
+    return {
+        **request,
+        "messages": [
+            *request["messages"],
+            {"role": "assistant", "content": _response_content(response)},
+            {
+                "role": "user",
+                "content": (
+                    "You marked needs_more_evidence=true without using artifact "
+                    "tools. Do not answer yet. First use the artifact tools to "
+                    "search for the most likely decisive log or read a narrow "
+                    "line window, then finalize the diagnosis. Keep tool usage "
+                    "targeted."
+                ),
+            },
+        ],
+    }
 
 
 def _tool_calls(response: Any) -> list[Any]:
