@@ -3,7 +3,7 @@
 Analyze a Solutions Run UUID and write a self-contained HTML diagnosis:
 
 ```bash
-python3 analyze.py <uuid>
+uv run sunbeam-triage <uuid>
 ```
 
 The harness mirrors the full UUID prefix from the configured Swift/RadosGW
@@ -20,10 +20,10 @@ environment variable named by `llm.api_key_env`, which defaults to
 Useful overrides:
 
 ```bash
-python3 analyze.py <uuid> --model openrouter/auto
-python3 analyze.py <uuid> --refresh
-python3 analyze.py <uuid> --offline
-python3 analyze.py <uuid> --output /tmp/diagnostics-{uuid}.html
+uv run sunbeam-triage <uuid> --model openrouter/auto
+uv run sunbeam-triage <uuid> --refresh
+uv run sunbeam-triage <uuid> --offline
+uv run sunbeam-triage <uuid> --output /tmp/diagnostics-{uuid}.html
 ```
 
 `--offline` skips Swift downloads and analyzes an already mirrored
@@ -32,6 +32,13 @@ python3 analyze.py <uuid> --output /tmp/diagnostics-{uuid}.html
 ## Verification
 
 ```bash
-python3 -m pytest -q
-python3 -m compileall -q analyze.py sunbeam_triage
+uv sync --dev
+uv run pytest -q
+uv run python -m compileall -q analyze.py streamlit_app.py sunbeam_triage
+```
+
+Run the Streamlit cockpit with:
+
+```bash
+OPENROUTER_API_KEY=<key> uv run streamlit run streamlit_app.py
 ```

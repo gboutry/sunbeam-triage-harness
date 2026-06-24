@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sunbeam-triage"
+version = "0.1.0"
+description = "Sunbeam CI failure triage harness and Streamlit cockpit"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+]
+
+[project.scripts]
+sunbeam-triage = "sunbeam_triage.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["sunbeam_triage*"]
