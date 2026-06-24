@@ -12,6 +12,7 @@ from sunbeam_triage.evidence import EvidenceCollector
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
 from sunbeam_triage.render import render_html
 from sunbeam_triage.swift import SwiftMirror
+from sunbeam_triage.tool_activity import analyze_tool_activity
 from sunbeam_triage.ui_helpers import (
     build_followup_context,
     evidence_line_map,
@@ -298,12 +299,14 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
     if not session:
         st.info("Select a diagnosis to inspect context.")
         return
-    tabs = st.tabs(["Evidence", "Files", "API"])
+    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "API"])
     with tabs[0]:
         _render_evidence_tab(session)
     with tabs[1]:
         _render_files_tab(config, session)
     with tabs[2]:
+        _render_tool_activity_tab(session)
+    with tabs[3]:
         st.json(session.get("exchanges", []), expanded=False)
 
 
@@ -332,6 +335,23 @@ def _render_evidence_tab(session: dict[str, Any]) -> None:
                 }
             )
             st.rerun()
+
+
+def _render_tool_activity_tab(session: dict[str, Any]) -> None:
+    analysis = analyze_tool_activity(session)
+    cols = st.columns(4)
+    cols[0].metric("Exchanges", analysis["exchange_count"])
+    cols[1].metric("Tool calls", analysis["tool_call_count"])
+    cols[2].metric("Tool result chars", analysis["tool_result_chars"])
+    cols[3].metric("Tokens", analysis["total_tokens"])
+    if analysis["warnings"]:
+        st.warning(", ".join(analysis["warnings"]))
+    if analysis["repeated_reads"]:
+        st.dataframe(analysis["repeated_reads"], use_container_width=True, hide_index=True)
+    if analysis["rows"]:
+        st.dataframe(analysis["rows"], use_container_width=True, hide_index=True)
+    else:
+        st.info("No tool activity recorded.")
 
 
 def _render_files_tab(config: Config, session: dict[str, Any]) -> None:

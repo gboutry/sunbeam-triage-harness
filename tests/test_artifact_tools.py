@@ -14,6 +14,7 @@ def test_artifact_tool_definitions_warn_that_file_reads_are_costly():
     assert [tool["function"]["name"] for tool in tools] == [
         "list_artifact_files",
         "get_artifact_file",
+        "search_artifacts",
         "list_sosreports",
         "list_sosreport_files",
         "search_sosreport",
@@ -72,6 +73,27 @@ def test_get_artifact_file_returns_bounded_text(tmp_path):
     }
 
 
+def test_get_artifact_file_reads_line_window(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text("line 1\nline 2\nline 3\nline 4\n", encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "get_artifact_file",
+        {
+            "path": "generated/sunbeam/output.log",
+            "line_start": 2,
+            "line_count": 2,
+        },
+    )
+
+    assert result["content"] == "line 2\nline 3"
+    assert result["line_start"] == 2
+    assert result["line_count"] == 2
+
+
 def test_get_artifact_file_rejects_paths_outside_artifact_root(tmp_path):
     result = execute_artifact_tool(
         tmp_path / "uuid",
@@ -107,6 +129,67 @@ def test_unknown_artifact_tool_returns_error(tmp_path):
         "ok": False,
         "error": "Unknown artifact tool: delete_artifact_file",
     }
+
+
+def test_search_artifacts_returns_bounded_matches_and_skips_archives(tmp_path):
+    root = tmp_path / "uuid"
+    (root / "generated/sunbeam").mkdir(parents=True)
+    (root / "generated/sunbeam/output.log").write_text(
+        "ok\nERROR first\nok\nERROR second\n",
+        encoding="utf-8",
+    )
+    (root / "generated/sunbeam/other.log").write_text("ERROR other\n", encoding="utf-8")
+    (root / "generated/sunbeam/sosreport-node.tar.xz").write_bytes(b"ERROR archive")
+    (root / "blob.bin").write_bytes(b"\x00ERROR")
+    (root / ".sunbeam-triage-ui/sessions").mkdir(parents=True)
+    (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text(
+        "ERROR internal",
+        encoding="utf-8",
+    )
+
+    result = execute_artifact_tool(
+        root,
+        "search_artifacts",
+        {
+            "pattern": "ERROR",
+            "path_prefix": "generated/sunbeam/",
+            "path_glob": "*.log",
+            "limit": 2,
+        },
+    )
+
+    assert result == {
+        "ok": True,
+        "matches": [
+            {
+                "path": "generated/sunbeam/other.log",
+                "line": 1,
+                "excerpt": "ERROR other",
+            },
+            {
+                "path": "generated/sunbeam/output.log",
+                "line": 2,
+                "excerpt": "ERROR first",
+            },
+        ],
+        "truncated": True,
+    }
+
+
+def test_search_artifacts_bounds_long_line_excerpts(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text("ERROR " + ("x" * 1000), encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "search_artifacts",
+        {"pattern": "ERROR"},
+    )
+
+    assert len(result["matches"][0]["excerpt"]) == 500
+    assert result["matches"][0]["excerpt"].endswith("...")
 
 
 def test_list_sosreports_returns_archives_with_host_and_member_count(tmp_path):

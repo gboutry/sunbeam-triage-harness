@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import fnmatch
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,11 @@ MANIFEST_NAME = ".sunbeam-triage-manifest.json"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
 DEFAULT_MAX_BYTES = 120_000
 MAX_BYTES_LIMIT = 250_000
+DEFAULT_READ_MAX_BYTES = 40_000
+READ_MAX_BYTES_LIMIT = 80_000
+DEFAULT_SEARCH_LIMIT = 50
+SEARCH_FILE_MAX_BYTES = 2_000_000
+SEARCH_EXCERPT_MAX_CHARS = 500
 
 
 def artifact_tool_definitions() -> list[dict[str, Any]]:
@@ -59,10 +66,56 @@ def artifact_tool_definitions() -> list[dict[str, Any]]:
                         "max_bytes": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": MAX_BYTES_LIMIT,
+                            "maximum": READ_MAX_BYTES_LIMIT,
                             "description": (
-                                "Maximum bytes to read. Defaults to 120000."
+                                "Maximum bytes to read. Defaults to 40000."
                             ),
+                        },
+                        "line_start": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Optional first 1-based line to return.",
+                        },
+                        "line_count": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Optional number of lines to return.",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_artifacts",
+                "description": (
+                    "Search downloaded text artifacts and return compact "
+                    "path:line excerpts. Use this before get_artifact_file "
+                    "when looking for specific errors or terms."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["pattern"],
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Case-insensitive regular expression to search.",
+                        },
+                        "path_prefix": {
+                            "type": "string",
+                            "description": "Optional artifact path prefix to search under.",
+                        },
+                        "path_glob": {
+                            "type": "string",
+                            "description": "Optional glob matched against relative paths.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500,
+                            "description": "Maximum matching lines to return.",
                         },
                     },
                 },
@@ -211,6 +264,8 @@ def execute_artifact_tool(
         return _list_artifact_files(root)
     if name == "get_artifact_file":
         return _get_artifact_file(root, arguments)
+    if name == "search_artifacts":
+        return _search_artifacts(root, arguments)
     if name == "list_sosreports":
         return list_sosreports(root)
     if name == "list_sosreport_files":
@@ -253,7 +308,13 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
             "error": "Artifact file does not exist.",
         }
 
-    max_bytes = _coerce_max_bytes(arguments.get("max_bytes"))
+    max_bytes = _coerce_max_bytes(
+        arguments.get("max_bytes"),
+        default=DEFAULT_READ_MAX_BYTES,
+        maximum=READ_MAX_BYTES_LIMIT,
+    )
+    line_start = _optional_positive_int(arguments.get("line_start"))
+    line_count = _optional_positive_int(arguments.get("line_count"))
     size = path.stat().st_size
     data = path.read_bytes()
     if b"\x00" in data[: min(len(data), max_bytes)]:
@@ -265,24 +326,126 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
             "binary": True,
         }
     truncated = len(data) > max_bytes
-    return {
+    text = data[:max_bytes].decode("utf-8", errors="replace")
+    if line_start is not None:
+        lines = text.splitlines()
+        count = line_count if line_count is not None else len(lines)
+        text = "\n".join(lines[line_start - 1 : line_start - 1 + count])
+    result = {
         "ok": True,
         "path": relative.as_posix(),
         "size_bytes": size,
-        "content": data[:max_bytes].decode("utf-8", errors="replace"),
+        "content": text,
         "truncated": truncated,
         "binary": False,
     }
+    if line_start is not None:
+        result["line_start"] = line_start
+        result["line_count"] = line_count if line_count is not None else len(text.splitlines())
+    return result
 
 
-def _coerce_max_bytes(value: Any) -> int:
+def _search_artifacts(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_pattern = str(arguments.get("pattern", ""))
+    if not raw_pattern:
+        return {"ok": False, "error": "Search pattern is required."}
+    try:
+        pattern = re.compile(raw_pattern, re.IGNORECASE)
+    except re.error as exc:
+        return {"ok": False, "error": f"Invalid search pattern: {exc}"}
+
+    path_prefix = str(arguments.get("path_prefix", ""))
+    path_glob = str(arguments.get("path_glob", ""))
+    limit = _coerce_limit(arguments.get("limit"), DEFAULT_SEARCH_LIMIT)
+    matches = []
+    truncated = False
+    root = Path(root)
+    for relative in _iter_searchable_files(root):
+        rel_posix = relative.as_posix()
+        if path_prefix and not rel_posix.startswith(path_prefix):
+            continue
+        if path_glob and not fnmatch.fnmatch(rel_posix, path_glob):
+            continue
+        path = root / relative
+        if path.stat().st_size > SEARCH_FILE_MAX_BYTES:
+            continue
+        data = path.read_bytes()
+        if b"\x00" in data[: min(len(data), 4096)]:
+            continue
+        text = data.decode("utf-8", errors="replace")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if pattern.search(line):
+                if len(matches) >= limit:
+                    truncated = True
+                    break
+                matches.append(
+                    {
+                        "path": rel_posix,
+                        "line": line_number,
+                        "excerpt": _search_excerpt(line),
+                    }
+                )
+        if truncated:
+            break
+    return {"ok": True, "matches": matches, "truncated": truncated}
+
+
+def _iter_searchable_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    files = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if _is_internal_path(relative):
+            continue
+        if _is_archive_path(relative):
+            continue
+        files.append(relative)
+    return sorted(files, key=lambda path: path.as_posix())
+
+
+def _coerce_max_bytes(
+    value: Any,
+    *,
+    default: int = DEFAULT_MAX_BYTES,
+    maximum: int = MAX_BYTES_LIMIT,
+) -> int:
     if value is None:
-        return DEFAULT_MAX_BYTES
+        return default
     try:
         max_bytes = int(value)
     except (TypeError, ValueError):
-        return DEFAULT_MAX_BYTES
-    return min(max(max_bytes, 1), MAX_BYTES_LIMIT)
+        return default
+    return min(max(max_bytes, 1), maximum)
+
+
+def _coerce_limit(value: Any, default: int) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(limit, 500))
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 1:
+        return None
+    return parsed
+
+
+def _search_excerpt(line: str) -> str:
+    excerpt = line.strip()
+    if len(excerpt) <= SEARCH_EXCERPT_MAX_CHARS:
+        return excerpt
+    return excerpt[: SEARCH_EXCERPT_MAX_CHARS - 3] + "..."
 
 
 def _is_unsafe_relative_path(path: Path) -> bool:
@@ -291,3 +454,7 @@ def _is_unsafe_relative_path(path: Path) -> bool:
 
 def _is_internal_path(path: Path) -> bool:
     return path.name == MANIFEST_NAME or SESSION_DIR_NAME in path.parts
+
+
+def _is_archive_path(path: Path) -> bool:
+    return path.name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".zip"))

@@ -7,6 +7,10 @@ def test_pyproject_declares_package_script_and_dependencies():
 
     assert data["project"]["name"] == "sunbeam-triage"
     assert data["project"]["scripts"]["sunbeam-triage"] == "sunbeam_triage.cli:main"
+    assert (
+        data["project"]["scripts"]["sunbeam-triage-analyze-rounds"]
+        == "sunbeam_triage.analyze_rounds:main"
+    )
     assert "streamlit" in data["project"]["dependencies"]
     assert "openrouter>=0.10.0" in data["project"]["dependencies"]
     assert "pytest" in data["dependency-groups"]["dev"]

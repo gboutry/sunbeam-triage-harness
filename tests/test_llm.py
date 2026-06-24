@@ -301,6 +301,86 @@ def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     assert "failure detail" in sdk.chat.calls[1]["messages"][-1]["content"]
 
 
+def test_openrouter_client_trims_large_tool_results_by_budget(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    log = artifact_root / "generated/run.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("x" * 500, encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/run.log", "max_bytes": 500}),
+                    )
+                ],
+            ),
+            FakeSdkResponse("I have enough context."),
+        ]
+    )
+
+    answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=artifact_root,
+        max_tool_result_chars=180,
+    )
+
+    tool_result = json.loads(sdk.chat.calls[1]["messages"][-1]["content"])
+    assert answer == "I have enough context."
+    assert tool_result["ok"] is True
+    assert tool_result["tool_result_truncated_by_budget"] is True
+    assert len(tool_result["content"]) < 100
+    assert len(sdk.chat.calls[1]["messages"][-1]["content"]) <= 180
+
+
+def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    first = artifact_root / "generated/first.log"
+    second = artifact_root / "generated/second.log"
+    first.parent.mkdir(parents=True)
+    first.write_text("a" * 300, encoding="utf-8")
+    second.write_text("b" * 300, encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/first.log", "max_bytes": 300}),
+                    ),
+                    FakeToolCall(
+                        "call-2",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/second.log", "max_bytes": 300}),
+                    ),
+                ],
+            ),
+            FakeSdkResponse("I have enough context."),
+        ]
+    )
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=artifact_root,
+        max_tool_result_chars=260,
+    )
+
+    tool_messages = [
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message.get("role") == "tool"
+    ]
+    assert sum(len(message["content"]) for message in tool_messages) <= 260
+    assert json.loads(tool_messages[-1]["content"])["tool_result_truncated_by_budget"] is True
+
+
 def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
     artifact_root = tmp_path / "uuid"
     archive = artifact_root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"
@@ -342,7 +422,8 @@ def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
     )
 
     assert answer == "The remote command completed."
-    assert sdk.chat.calls[0]["tools"][4]["function"]["name"] == "search_sosreport"
+    tool_names = [tool["function"]["name"] for tool in sdk.chat.calls[0]["tools"]]
+    assert "search_sosreport" in tool_names
     assert sdk.chat.calls[1]["messages"][-1]["role"] == "tool"
     assert "ResultType.COMPLETED" in sdk.chat.calls[1]["messages"][-1]["content"]
 

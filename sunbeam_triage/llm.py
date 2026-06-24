@@ -141,6 +141,7 @@ class OpenRouterClient:
         session_id: str | None = None,
         artifact_root: Path | None = None,
         max_tool_rounds: int = 4,
+        max_tool_result_chars: int = 60_000,
     ) -> DiagnosisReport:
         request = {
             "model": self.config.model,
@@ -150,9 +151,11 @@ class OpenRouterClient:
                     "content": (
                         "You are a CI failure diagnostician. Use only the provided "
                         "evidence. Do not invent files, timestamps, or causes. "
-                        "If more log context is needed, list artifact files first. "
-                        "For sosreport archives, search inside the archive before "
-                        "reading a specific member. "
+                        "If more log context is needed, list artifact files first "
+                        "and search artifacts before reading whole files. For "
+                        "sosreport archives, search inside the archive before "
+                        "reading a specific member. Prefer line windows over full "
+                        "file reads. "
                         "Read a specific file only when it is likely to materially "
                         "improve the diagnosis, because file reads can be costly."
                     ),
@@ -168,6 +171,7 @@ class OpenRouterClient:
             request,
             artifact_root=artifact_root,
             max_tool_rounds=max_tool_rounds,
+            max_tool_result_chars=max_tool_result_chars,
         )
         content = _response_content(response)
         try:
@@ -184,6 +188,7 @@ class OpenRouterClient:
         session_id: str | None = None,
         artifact_root: Path | None = None,
         max_tool_rounds: int = 4,
+        max_tool_result_chars: int = 60_000,
     ) -> str:
         request = {
             "model": self.config.model,
@@ -194,11 +199,12 @@ class OpenRouterClient:
                         "You are continuing a Sunbeam CI failure diagnosis. "
                         "Use the provided diagnosis context and evidence. "
                         "Separate evidence from inference. If more log context "
-                        "is needed, list artifact files first. For sosreport "
-                        "archives, search inside the archive before reading a "
-                        "specific member. Read a specific file only when it is "
-                        "likely to materially improve the answer, because file "
-                        "reads can be costly."
+                        "is needed, list artifact files first and search artifacts "
+                        "before reading whole files. For sosreport archives, search "
+                        "inside the archive before reading a specific member. "
+                        "Prefer line windows over full file reads. Read a specific "
+                        "file only when it is likely to materially improve the "
+                        "answer, because file reads can be costly."
                     ),
                 },
                 {"role": "user", "content": context_text},
@@ -212,6 +218,7 @@ class OpenRouterClient:
             request,
             artifact_root=artifact_root,
             max_tool_rounds=max_tool_rounds,
+            max_tool_result_chars=max_tool_result_chars,
         )
         return _response_content(response)
 
@@ -221,6 +228,7 @@ class OpenRouterClient:
         *,
         artifact_root: Path | None,
         max_tool_rounds: int,
+        max_tool_result_chars: int,
     ):
         if artifact_root is None:
             response = self._send(request)
@@ -242,10 +250,11 @@ class OpenRouterClient:
             request["messages"] = [
                 *request["messages"],
                 _assistant_tool_message(response),
-                *[
-                    _tool_result_message(artifact_root, tool_call)
-                    for tool_call in tool_calls
-                ],
+                *_tool_result_messages(
+                    artifact_root,
+                    tool_calls,
+                    max_chars=max_tool_result_chars,
+                ),
             ]
 
         final_request = _final_request_without_artifact_tools(request)
@@ -330,14 +339,84 @@ def _assistant_tool_message(response: Any) -> dict[str, Any]:
     }
 
 
-def _tool_result_message(root: Path, tool_call: Any) -> dict[str, Any]:
+def _tool_result_message(
+    root: Path,
+    tool_call: Any,
+    *,
+    max_chars: int,
+) -> dict[str, Any]:
     name, arguments = _tool_call_name_and_arguments(tool_call)
     result = execute_artifact_tool(root, name, arguments)
+    content = _tool_result_content(result, max_chars=max_chars)
     return {
         "role": "tool",
         "tool_call_id": _tool_call_id(tool_call),
-        "content": json.dumps(result, sort_keys=True),
+        "content": content,
     }
+
+
+def _tool_result_messages(
+    root: Path,
+    tool_calls: list[Any],
+    *,
+    max_chars: int,
+) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    remaining_budget = max(max_chars, 0)
+    for index, tool_call in enumerate(tool_calls):
+        remaining_calls = len(tool_calls) - index
+        call_budget = remaining_budget // remaining_calls if remaining_calls else 0
+        message = _tool_result_message(root, tool_call, max_chars=call_budget)
+        remaining_budget = max(remaining_budget - len(message["content"]), 0)
+        messages.append(message)
+    return messages
+
+
+def _tool_result_content(result: dict[str, Any], *, max_chars: int) -> str:
+    content = json.dumps(result, sort_keys=True)
+    if len(content) <= max_chars:
+        return content
+
+    trimmed = dict(result)
+    if isinstance(trimmed.get("content"), str):
+        trimmed["tool_result_truncated_by_budget"] = True
+        overhead = len(json.dumps({**trimmed, "content": ""}, sort_keys=True))
+        budget = max(max_chars - overhead - 16, 0)
+        trimmed["content"] = trimmed["content"][:budget]
+    elif isinstance(trimmed.get("files"), list):
+        trimmed["files"] = []
+        trimmed["tool_result_truncated_by_budget"] = True
+        trimmed["error"] = "Tool result exceeded budget; use a narrower prefix."
+    elif isinstance(trimmed.get("matches"), list):
+        trimmed["matches"] = []
+        trimmed["tool_result_truncated_by_budget"] = True
+        trimmed["error"] = "Tool result exceeded budget; use a narrower search."
+    else:
+        trimmed = {
+            "ok": False,
+            "tool_result_truncated_by_budget": True,
+            "error": "Tool result exceeded budget; narrow the request.",
+        }
+
+    content = json.dumps(trimmed, sort_keys=True)
+    if len(content) <= max_chars:
+        return content
+    compact = json.dumps(
+        {
+            "ok": False,
+            "tool_result_truncated_by_budget": True,
+            "error": "Tool result exceeded budget; narrow the request.",
+        },
+        sort_keys=True,
+    )
+    if len(compact) <= max_chars:
+        return compact
+    minimal = json.dumps({"tool_result_truncated_by_budget": True}, sort_keys=True)
+    if len(minimal) <= max_chars:
+        return minimal
+    if max_chars >= 2:
+        return "{}"
+    return ""
 
 
 def _final_request_without_artifact_tools(request: dict[str, Any]) -> dict[str, Any]:
