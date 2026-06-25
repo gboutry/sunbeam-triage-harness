@@ -58,6 +58,23 @@ def test_swift_mirror_downloads_all_objects_and_skips_unchanged(tmp_path):
     assert (tmp_path / "artifacts" / uuid / "generated/github-runner/jobs.json").read_text() == "world"
     assert len(manifest.objects) == 2
     assert len(manifest_again.objects) == 2
+    manifest_json = json.loads(
+        (tmp_path / "artifacts" / uuid / ".sunbeam-triage-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest_json == [
+        {
+            "bytes": -1,
+            "hash": None,
+            "name": f"{uuid}/generated/sunbeam/output.log",
+        },
+        {
+            "bytes": -1,
+            "hash": None,
+            "name": f"{uuid}/generated/github-runner/jobs.json",
+        },
+    ]
     assert http.urls.count(output_url) == 1
     assert http.urls.count(jobs_url) == 1
 

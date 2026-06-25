@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
@@ -140,7 +140,7 @@ class SwiftMirror:
         manifest_path = root / ".sunbeam-triage-manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(
-            json.dumps([obj.__dict__ for obj in objects], indent=2, sort_keys=True),
+            json.dumps([asdict(obj) for obj in objects], indent=2, sort_keys=True),
             encoding="utf-8",
         )
         return MirrorManifest(

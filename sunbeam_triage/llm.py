@@ -11,6 +11,23 @@ from .artifact_tools import artifact_tool_definitions, execute_artifact_tool
 from .config import LlmConfig
 
 
+EVIDENCE_PRODUCING_TOOLS = {
+    "search_artifacts",
+    "get_artifact_file",
+    "search_sosreport",
+    "get_sosreport_file",
+}
+DISCOVERY_TOOLS = {
+    "list_artifact_files",
+    "list_sosreports",
+    "list_sosreport_files",
+}
+TOOL_RESULT_TRUNCATED_MARKER = json.dumps(
+    {"tool_result_truncated_by_budget": True},
+    sort_keys=True,
+)
+
+
 @dataclass(frozen=True)
 class ReportEvidence:
     path: str
@@ -182,14 +199,26 @@ class OpenRouterClient:
             max_tool_result_chars=max_tool_result_chars,
         )
         data = _response_json(response)
-        if _exchange_range_has_tool_budget_fallback(self.exchanges, exchange_start):
+        has_tool_budget_fallback = _exchange_range_has_tool_budget_fallback(
+            self.exchanges,
+            exchange_start,
+        )
+        if has_tool_budget_fallback:
             data = _downgrade_tool_budget_diagnosis(data)
         if (
-            data.get("needs_more_evidence") is True
+            not has_tool_budget_fallback
             and artifact_root is not None
-            and not _exchange_range_has_tool_calls(self.exchanges, exchange_start)
+            and _diagnosis_needs_required_tool_retry(
+                data,
+                self.exchanges,
+                exchange_start,
+            )
         ):
-            retry_request = _request_with_evidence_retry(request, response)
+            retry_request = _request_with_evidence_retry(
+                request,
+                response,
+                data=data,
+            )
             response = self._send_with_artifact_tools(
                 retry_request,
                 artifact_root=artifact_root,
@@ -202,7 +231,18 @@ class OpenRouterClient:
                 self.exchanges,
                 exchange_start,
             ):
+                has_tool_budget_fallback = True
                 data = _downgrade_tool_budget_diagnosis(data)
+        if (
+            not has_tool_budget_fallback
+            and artifact_root is not None
+            and _diagnosis_confidence_requires_artifact_evidence(data)
+            and not _exchange_range_has_evidence_tool_calls(
+                self.exchanges,
+                exchange_start,
+            )
+        ):
+            data = _downgrade_missing_tool_evidence_diagnosis(data)
         return DiagnosisReport.from_dict(data)
 
     def chat(
@@ -376,6 +416,33 @@ def _exchange_range_has_tool_calls(
     return False
 
 
+def _exchange_range_has_evidence_tool_calls(
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    return bool(
+        _exchange_range_tool_names(exchanges, start_index) & EVIDENCE_PRODUCING_TOOLS
+    )
+
+
+def _exchange_range_tool_names(
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> set[str]:
+    names = set()
+    for exchange in exchanges[start_index:]:
+        response = exchange.get("response", {})
+        if not isinstance(response, dict):
+            continue
+        for tool_call in response.get("tool_calls", []) or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function", {})
+            if isinstance(function, dict):
+                names.add(str(function.get("name", "")))
+    return names
+
+
 def _exchange_range_has_tool_budget_fallback(
     exchanges: list[dict[str, Any]],
     start_index: int,
@@ -393,6 +460,26 @@ def _exchange_range_has_tool_budget_fallback(
             if "artifact tool budget is exhausted" in content:
                 return True
     return False
+
+
+def _diagnosis_needs_required_tool_retry(
+    data: dict[str, Any],
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    if data.get("needs_more_evidence") is True and not _exchange_range_has_tool_calls(
+        exchanges,
+        start_index,
+    ):
+        return True
+    return (
+        _diagnosis_confidence_requires_artifact_evidence(data)
+        and not _exchange_range_has_evidence_tool_calls(exchanges, start_index)
+    )
+
+
+def _diagnosis_confidence_requires_artifact_evidence(data: dict[str, Any]) -> bool:
+    return data.get("confidence") in {"supported", "confirmed"}
 
 
 def _downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
@@ -420,33 +507,68 @@ def _downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
     return downgraded
 
 
+def _downgrade_missing_tool_evidence_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
+    downgraded = dict(data)
+    if downgraded.get("confidence") in {"supported", "confirmed"}:
+        downgraded["confidence"] = "speculative"
+    downgraded["needs_more_evidence"] = True
+    unknowns = [str(item) for item in downgraded.get("unknowns", []) if item is not None]
+    missing_unknown = (
+        "No evidence-producing artifact tools were used to validate the "
+        "diagnosis against the downloaded artifacts."
+    )
+    if missing_unknown not in unknowns:
+        unknowns.append(missing_unknown)
+    downgraded["unknowns"] = unknowns
+    mechanisms = []
+    for item in downgraded.get("candidate_mechanisms", []):
+        if not isinstance(item, dict):
+            continue
+        mechanism = dict(item)
+        if mechanism.get("status") in {"supported", "confirmed"}:
+            mechanism["status"] = "speculative"
+        mechanisms.append(mechanism)
+    downgraded["candidate_mechanisms"] = mechanisms
+    return downgraded
+
+
 def _request_with_evidence_retry(
     request: dict[str, Any],
     response: Any,
+    *,
+    data: dict[str, Any],
 ) -> dict[str, Any]:
+    if data.get("needs_more_evidence") is True:
+        retry_content = (
+            "You marked needs_more_evidence=true without using artifact "
+            "tools. Do not answer yet. First use the artifact tools to "
+            "search for the most likely decisive log or read a narrow "
+            "line window, then finalize the diagnosis. Keep tool usage "
+            "targeted."
+        )
+    else:
+        retry_content = (
+            "You returned a supported or confirmed diagnosis without using "
+            "an evidence-producing artifact tool. Do not answer yet. First "
+            "use an evidence-producing artifact tool such as search_artifacts, "
+            "get_artifact_file, search_sosreport, or get_sosreport_file to "
+            "validate the most likely decisive evidence, then finalize the "
+            "diagnosis. Keep tool usage targeted."
+        )
     return {
         **request,
         "messages": [
             *request["messages"],
             {"role": "assistant", "content": _response_content(response)},
-            {
-                "role": "user",
-                "content": (
-                    "You marked needs_more_evidence=true without using artifact "
-                    "tools. Do not answer yet. First use the artifact tools to "
-                    "search for the most likely decisive log or read a narrow "
-                    "line window, then finalize the diagnosis. Keep tool usage "
-                    "targeted."
-                ),
-            },
+            {"role": "user", "content": retry_content},
         ],
     }
 
 
 def _tool_calls_need_targeted_read_nudge(tool_calls: list[Any]) -> bool:
     names = {_tool_call_name_and_arguments(call)[0] for call in tool_calls}
-    broad_tools = {"list_artifact_files", "list_sosreports", "search_artifacts"}
-    targeted_tools = {"get_artifact_file", "search_sosreport", "get_sosreport_file"}
+    broad_tools = DISCOVERY_TOOLS | {"search_artifacts"}
+    targeted_tools = EVIDENCE_PRODUCING_TOOLS - {"search_artifacts"}
     return bool(names & broad_tools) and not bool(names & targeted_tools)
 
 
@@ -550,12 +672,7 @@ def _tool_result_content(result: dict[str, Any], *, max_chars: int) -> str:
     )
     if len(compact) <= max_chars:
         return compact
-    minimal = json.dumps({"tool_result_truncated_by_budget": True}, sort_keys=True)
-    if len(minimal) <= max_chars:
-        return minimal
-    if max_chars >= 2:
-        return "{}"
-    return ""
+    return TOOL_RESULT_TRUNCATED_MARKER
 
 
 def _final_request_without_artifact_tools(request: dict[str, Any]) -> dict[str, Any]:

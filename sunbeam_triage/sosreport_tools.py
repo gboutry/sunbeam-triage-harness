@@ -24,7 +24,6 @@ def list_sosreports(root: Path) -> dict[str, Any]:
                 "path": relative,
                 "host": _host_from_archive_name(path.name),
                 "size_bytes": path.stat().st_size,
-                "member_count": _member_count(path),
             }
         )
     return {"ok": True, "archives": archives}
@@ -229,11 +228,6 @@ def _is_unsafe_member_path(path: PurePosixPath) -> bool:
 
 def _is_binary(data: bytes) -> bool:
     return b"\x00" in data[: min(len(data), 4096)]
-
-
-def _member_count(path: Path) -> int:
-    with tarfile.open(path, "r:*") as archive:
-        return sum(1 for member in archive.getmembers() if member.isfile())
 
 
 def _host_from_archive_name(name: str) -> str:

@@ -413,6 +413,52 @@ def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
     assert json.loads(tool_messages[-1]["content"])["tool_result_truncated_by_budget"] is True
 
 
+def test_openrouter_client_reports_truncation_when_call_budget_is_tiny(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    first = artifact_root / "generated/first.log"
+    second = artifact_root / "generated/second.log"
+    first.parent.mkdir(parents=True)
+    first.write_text("a" * 300, encoding="utf-8")
+    second.write_text("b" * 300, encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/first.log", "max_bytes": 300}),
+                    ),
+                    FakeToolCall(
+                        "call-2",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/second.log", "max_bytes": 300}),
+                    ),
+                ],
+            ),
+            FakeSdkResponse("I have enough context."),
+        ]
+    )
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=artifact_root,
+        max_tool_result_chars=20,
+    )
+
+    tool_messages = [
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message.get("role") == "tool"
+    ]
+    assert all(
+        "tool_result_truncated_by_budget" in message["content"]
+        for message in tool_messages
+    )
+
+
 def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_tools(
     tmp_path,
 ):
@@ -481,8 +527,14 @@ def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_to
     assert "Do not answer yet" in retry_message
 
 
-def test_openrouter_client_does_not_retry_concrete_no_tool_diagnosis(tmp_path):
-    response = {
+def test_openrouter_client_retries_supported_no_tool_diagnosis_until_evidence_tool_used(
+    tmp_path,
+):
+    artifact_root = tmp_path / "uuid"
+    log = artifact_root / "generated/sunbeam/validation_refstack.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("Details: Unexpected status code 502\n", encoding="utf-8")
+    unsupported = {
         "summary": "Refstack failed.",
         "failure_surface": "refstack exited 1.",
         "confidence": "supported",
@@ -499,15 +551,126 @@ def test_openrouter_client_does_not_retry_concrete_no_tool_diagnosis(tmp_path):
         "recommendations": [],
         "unknowns": [],
     }
-    sdk = FakeSdkClient(FakeSdkResponse(json.dumps(response)))
+    supported = {
+        **unsupported,
+        "summary": "Refstack failed while authenticating.",
+    }
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(json.dumps(unsupported)),
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "search_artifacts",
+                        json.dumps({"pattern": "Unexpected status code 502"}),
+                    )
+                ],
+            ),
+            FakeSdkResponse(json.dumps(supported)),
+        ]
+    )
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=artifact_root,
+    )
+
+    assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
+    assert len(sdk.chat.calls) == 3
+    assert sdk.chat.calls[0]["tool_choice"] == "auto"
+    assert sdk.chat.calls[1]["tool_choice"] == "required"
+    retry_message = sdk.chat.calls[1]["messages"][-1]["content"]
+    assert "supported or confirmed diagnosis" in retry_message
+    assert "evidence-producing artifact tool" in retry_message
+
+
+def test_openrouter_client_downgrades_supported_diagnosis_without_evidence_tool(
+    tmp_path,
+):
+    response = {
+        "summary": "Refstack failed.",
+        "failure_surface": "refstack exited 1.",
+        "confidence": "supported",
+        "root_cause": "Keystone returned HTTP 502 during Tempest auth.",
+        "needs_more_evidence": False,
+        "evidence": [
+            {
+                "path": "generated/sunbeam/validation_refstack.log",
+                "line": 1,
+                "excerpt": "Details: Unexpected status code 502",
+            }
+        ],
+        "candidate_mechanisms": [
+            {
+                "name": "keystone 502",
+                "status": "supported",
+                "rationale": "The provided evidence says 502.",
+            }
+        ],
+        "recommendations": [],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(json.dumps(response)),
+            FakeSdkResponse(json.dumps(response)),
+        ]
+    )
 
     report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
         "evidence text",
         artifact_root=tmp_path,
     )
 
-    assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
-    assert len(sdk.chat.calls) == 1
+    assert report.confidence == "speculative"
+    assert report.needs_more_evidence is True
+    assert report.candidate_mechanisms[0].status == "speculative"
+    assert any("artifact tools" in unknown for unknown in report.unknowns)
+    assert len(sdk.chat.calls) == 2
+
+
+def test_openrouter_client_downgrades_discovery_only_diagnosis_without_evidence_tool(
+    tmp_path,
+):
+    response = {
+        "summary": "Refstack failed.",
+        "failure_surface": "refstack exited 1.",
+        "confidence": "confirmed",
+        "root_cause": "Keystone returned HTTP 502 during Tempest auth.",
+        "needs_more_evidence": False,
+        "evidence": [],
+        "candidate_mechanisms": [
+            {
+                "name": "keystone 502",
+                "status": "confirmed",
+                "rationale": "A candidate artifact was listed.",
+            }
+        ],
+        "recommendations": [],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
+            ),
+            FakeSdkResponse(json.dumps(response)),
+            FakeSdkResponse(json.dumps(response)),
+        ]
+    )
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=tmp_path,
+    )
+
+    assert report.confidence == "speculative"
+    assert report.needs_more_evidence is True
+    assert report.candidate_mechanisms[0].status == "speculative"
+    assert len(sdk.chat.calls) == 3
 
 
 def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):

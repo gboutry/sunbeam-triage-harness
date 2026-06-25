@@ -159,11 +159,27 @@ class EvidenceCollector:
             return step
         raise RuntimeError("No failed non-cleanup step found in jobs.json")
 
-    @staticmethod
-    def _step_family(name: str) -> str:
+    def _step_family(self, name: str) -> str:
         if name.startswith("sunbeam_"):
             return "sunbeam"
+        if self._has_sunbeam_artifacts():
+            return "sunbeam"
         return "generic"
+
+    def _has_sunbeam_artifacts(self) -> bool:
+        sunbeam_root = self.root / "generated/sunbeam"
+        if not sunbeam_root.is_dir():
+            return False
+        return any(
+            (self.root / rel).exists()
+            for rel in (
+                "generated/sunbeam/output.log",
+                "generated/sunbeam/juju_status_openstack.txt",
+                "generated/sunbeam/juju_status_openstack-machines.txt",
+                "generated/sunbeam/kubectl_get_pod.txt",
+                "generated/sunbeam/sunbeam_cluster_list.txt",
+            )
+        )
 
     def _collect_evidence(self, failed: FailedStep) -> list[EvidenceItem]:
         evidence: list[EvidenceItem] = []
@@ -231,7 +247,7 @@ class EvidenceCollector:
             stripped = line.strip()
             if not stripped:
                 continue
-            if number <= 12 or re.search(
+            if re.search(
                 r"\b(blocked|error|waiting|maintenance|lost|unknown|executing)\b",
                 stripped,
                 re.IGNORECASE,

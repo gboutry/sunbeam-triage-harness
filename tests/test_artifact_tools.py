@@ -192,7 +192,7 @@ def test_search_artifacts_bounds_long_line_excerpts(tmp_path):
     assert result["matches"][0]["excerpt"].endswith("...")
 
 
-def test_list_sosreports_returns_archives_with_host_and_member_count(tmp_path):
+def test_list_sosreports_returns_archives_with_host_without_scanning_members(tmp_path):
     root = tmp_path / "uuid"
     archive = root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"
     _write_sosreport(
@@ -213,7 +213,6 @@ def test_list_sosreports_returns_archives_with_host_and_member_count(tmp_path):
                 "path": "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz",
                 "host": "node-a",
                 "size_bytes": archive.stat().st_size,
-                "member_count": 2,
             }
         ],
     }

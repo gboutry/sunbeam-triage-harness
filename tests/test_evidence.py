@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from sunbeam_triage.evidence import EvidenceCollector
@@ -36,3 +37,101 @@ def test_evidence_redacts_obvious_secret_values():
 
     assert "super-secret-value" not in prompt
     assert "OS_PASSWORD=<redacted>" in prompt
+
+
+def test_evidence_collector_uses_sunbeam_artifacts_for_human_named_sunbeam_steps(
+    tmp_path,
+):
+    _write_jobs(tmp_path, failed_step_name="Deploy sunbeam")
+    (tmp_path / "generated/sunbeam").mkdir(parents=True)
+    (tmp_path / "generated/sunbeam/output.log").write_text(
+        "wait timed out\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "generated/sunbeam/juju_status_openstack.txt").write_text(
+        "Model benign header\nkeystone/0 waiting idle\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "generated/github-runner/run.log").write_text(
+        "Process completed with exit code 1\n",
+        encoding="utf-8",
+    )
+
+    pack = EvidenceCollector(tmp_path, "uuid").collect()
+
+    assert pack.failed_step.family == "sunbeam"
+    assert any(item.kind == "sunbeam-output" for item in pack.evidence)
+    assert any(item.kind == "juju-status" for item in pack.evidence)
+
+
+def test_evidence_collector_keeps_generic_steps_generic_without_sunbeam_artifacts(
+    tmp_path,
+):
+    _write_jobs(tmp_path, failed_step_name="Build wheels")
+    (tmp_path / "generated/github-runner").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "generated/github-runner/run.log").write_text(
+        "Process completed with exit code 1\n",
+        encoding="utf-8",
+    )
+
+    pack = EvidenceCollector(tmp_path, "uuid").collect()
+
+    assert pack.failed_step.family == "generic"
+    assert {item.kind for item in pack.evidence} == {"github-runner"}
+
+
+def test_status_summary_omits_benign_headers_but_keeps_status_signal(tmp_path):
+    status = tmp_path / "status.txt"
+    status.write_text(
+        "\n".join(
+            [
+                "Model Controller Cloud",
+                "openstack controller localhost",
+                "App Version Status",
+                "keystone active",
+                "nova active",
+                "glance active",
+                "cinder active",
+                "ovn active",
+                "rabbitmq active",
+                "mysql active",
+                "placement active",
+                "horizon active",
+                "placement-mysql-router waiting idle",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    items = EvidenceCollector(tmp_path, "uuid")._summarize_status(
+        "status.txt",
+        "juju-status",
+    )
+
+    assert [item.excerpt for item in items] == ["placement-mysql-router waiting idle"]
+
+
+def _write_jobs(root: Path, *, failed_step_name: str) -> None:
+    jobs = {
+        "jobs": [
+            {
+                "run_id": 202,
+                "workflow_name": "workflow",
+                "head_branch": "main",
+                "html_url": "https://example.invalid/job",
+                "started_at": "2026-06-01T10:00:00Z",
+                "completed_at": "2026-06-01T10:10:00Z",
+                "name": "Run the pipeline",
+                "steps": [
+                    {
+                        "name": failed_step_name,
+                        "conclusion": "failure",
+                        "number": 1,
+                    }
+                ],
+            }
+        ]
+    }
+    path = root / "generated/github-runner/jobs.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(jobs), encoding="utf-8")
