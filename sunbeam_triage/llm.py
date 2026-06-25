@@ -409,10 +409,22 @@ def _response_json(response: Any) -> dict[str, Any]:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise RuntimeError("LLM response was not valid JSON") from exc
+        raise RuntimeError(
+            "LLM response was not valid JSON. "
+            f"Response preview: {_response_preview(content)}"
+        ) from exc
     if not isinstance(data, dict):
-        raise RuntimeError("LLM response JSON was not an object")
+        raise RuntimeError(
+            "LLM response JSON was not an object. "
+            f"Response preview: {_response_preview(content)}"
+        )
     return data
+
+
+def _response_preview(content: str, max_chars: int = 4000) -> str:
+    if len(content) <= max_chars:
+        return content
+    return content[: max_chars - 16] + "\n[truncated]\n"
 
 
 def _exchange_range_has_tool_calls(

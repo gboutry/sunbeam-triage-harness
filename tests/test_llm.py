@@ -127,6 +127,20 @@ def test_openrouter_client_requests_structured_diagnosis_with_sdk():
     assert report.evidence[0].line == 2
 
 
+def test_openrouter_client_includes_response_preview_for_invalid_json():
+    sdk = FakeSdkClient(FakeSdkResponse("not json from model"))
+
+    with pytest.raises(RuntimeError, match="not json from model"):
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose("evidence text")
+
+
+def test_openrouter_client_includes_response_preview_for_non_object_json():
+    sdk = FakeSdkClient(FakeSdkResponse(json.dumps(["tool required", "no object"])))
+
+    with pytest.raises(RuntimeError, match=r'\["tool required", "no object"\]'):
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose("evidence text")
+
+
 def test_diagnosis_report_defaults_needs_more_evidence_for_old_payloads():
     report = DiagnosisReport.from_dict(
         {
