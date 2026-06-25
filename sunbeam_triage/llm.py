@@ -219,6 +219,7 @@ class OpenRouterClient:
                 response,
                 data=data,
             )
+            retry_start = len(self.exchanges)
             response = self._send_with_artifact_tools(
                 retry_request,
                 artifact_root=artifact_root,
@@ -233,6 +234,11 @@ class OpenRouterClient:
             ):
                 has_tool_budget_fallback = True
                 data = _downgrade_tool_budget_diagnosis(data)
+            elif not _exchange_range_has_tool_calls(self.exchanges, retry_start):
+                raise RuntimeError(
+                    "Model ignored required artifact tool use; diagnosis was "
+                    "not validated."
+                )
         if (
             not has_tool_budget_fallback
             and artifact_root is not None
@@ -242,7 +248,11 @@ class OpenRouterClient:
                 exchange_start,
             )
         ):
-            data = _downgrade_missing_tool_evidence_diagnosis(data)
+            raise RuntimeError(
+                "Model returned a supported or confirmed diagnosis without "
+                "using an evidence-producing artifact tool; diagnosis was not "
+                "validated."
+            )
         return DiagnosisReport.from_dict(data)
 
     def chat(
@@ -502,31 +512,6 @@ def _downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
         mechanism = dict(item)
         if mechanism.get("status") == "confirmed":
             mechanism["status"] = "supported"
-        mechanisms.append(mechanism)
-    downgraded["candidate_mechanisms"] = mechanisms
-    return downgraded
-
-
-def _downgrade_missing_tool_evidence_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
-    downgraded = dict(data)
-    if downgraded.get("confidence") in {"supported", "confirmed"}:
-        downgraded["confidence"] = "speculative"
-    downgraded["needs_more_evidence"] = True
-    unknowns = [str(item) for item in downgraded.get("unknowns", []) if item is not None]
-    missing_unknown = (
-        "No evidence-producing artifact tools were used to validate the "
-        "diagnosis against the downloaded artifacts."
-    )
-    if missing_unknown not in unknowns:
-        unknowns.append(missing_unknown)
-    downgraded["unknowns"] = unknowns
-    mechanisms = []
-    for item in downgraded.get("candidate_mechanisms", []):
-        if not isinstance(item, dict):
-            continue
-        mechanism = dict(item)
-        if mechanism.get("status") in {"supported", "confirmed"}:
-            mechanism["status"] = "speculative"
         mechanisms.append(mechanism)
     downgraded["candidate_mechanisms"] = mechanisms
     return downgraded

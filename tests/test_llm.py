@@ -2,6 +2,8 @@ import io
 import json
 import tarfile
 
+import pytest
+
 from sunbeam_triage.config import Config
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
 
@@ -586,7 +588,7 @@ def test_openrouter_client_retries_supported_no_tool_diagnosis_until_evidence_to
     assert "evidence-producing artifact tool" in retry_message
 
 
-def test_openrouter_client_downgrades_supported_diagnosis_without_evidence_tool(
+def test_openrouter_client_rejects_supported_diagnosis_when_required_tools_are_ignored(
     tmp_path,
 ):
     response = {
@@ -619,19 +621,16 @@ def test_openrouter_client_downgrades_supported_diagnosis_without_evidence_tool(
         ]
     )
 
-    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
-        "evidence text",
-        artifact_root=tmp_path,
-    )
+    with pytest.raises(RuntimeError, match="ignored required artifact tool use"):
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+            "evidence text",
+            artifact_root=tmp_path,
+        )
 
-    assert report.confidence == "speculative"
-    assert report.needs_more_evidence is True
-    assert report.candidate_mechanisms[0].status == "speculative"
-    assert any("artifact tools" in unknown for unknown in report.unknowns)
     assert len(sdk.chat.calls) == 2
 
 
-def test_openrouter_client_downgrades_discovery_only_diagnosis_without_evidence_tool(
+def test_openrouter_client_rejects_discovery_only_supported_diagnosis_without_evidence_tool(
     tmp_path,
 ):
     response = {
@@ -658,19 +657,21 @@ def test_openrouter_client_downgrades_discovery_only_diagnosis_without_evidence_
                 tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
             ),
             FakeSdkResponse(json.dumps(response)),
+            FakeSdkResponse(
+                "",
+                tool_calls=[FakeToolCall("call-2", "list_sosreports", "{}")],
+            ),
             FakeSdkResponse(json.dumps(response)),
         ]
     )
 
-    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
-        "evidence text",
-        artifact_root=tmp_path,
-    )
+    with pytest.raises(RuntimeError, match="evidence-producing artifact tool"):
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+            "evidence text",
+            artifact_root=tmp_path,
+        )
 
-    assert report.confidence == "speculative"
-    assert report.needs_more_evidence is True
-    assert report.candidate_mechanisms[0].status == "speculative"
-    assert len(sdk.chat.calls) == 3
+    assert len(sdk.chat.calls) == 4
 
 
 def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):
