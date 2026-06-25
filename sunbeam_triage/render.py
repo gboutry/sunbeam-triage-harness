@@ -25,9 +25,13 @@ def render_html(pack: EvidencePack, report: DiagnosisReport) -> str:
             _section("Failure Surface", f"<p>{escape(report.failure_surface)}</p>"),
             _section("Root Cause", f"<p>{escape(report.root_cause)}</p>"),
             _report_evidence(report),
+            _failure_timeline(report),
+            _cascading_errors(report),
             _candidate_mechanisms(report),
+            _alternatives_considered(report),
             _list_section("Recommendations", report.recommendations),
             _list_section("Unknowns", report.unknowns),
+            _list_section("Missing Evidence", report.missing_evidence),
             _harness_evidence(pack),
             "</body>",
             "</html>",
@@ -46,6 +50,8 @@ def _summary(pack: EvidencePack, report: DiagnosisReport) -> str:
     <dt>Workflow</dt><dd>{escape(pack.run.workflow)}</dd>
     <dt>Failed Step</dt><dd>{escape(pack.failed_step.name)}</dd>
     <dt>Confidence</dt><dd>{escape(report.confidence)}</dd>
+    <dt>Triage Confidence</dt><dd>{escape(report.triage_confidence)}</dd>
+    <dt>Stop Reason</dt><dd>{escape(report.stop_reason or "not reported")}</dd>
   </dl>
 </section>
 """.strip()
@@ -88,6 +94,63 @@ def _candidate_mechanisms(report: DiagnosisReport) -> str:
         "Candidate Mechanisms",
         "<table><thead><tr><th>Name</th><th>Status</th><th>Rationale</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>",
+    )
+
+
+def _failure_timeline(report: DiagnosisReport) -> str:
+    if not report.failure_timeline:
+        return _section("Failure Timeline", "<p>No timeline returned.</p>")
+    rows = [
+        "<tr>"
+        f"<td>{escape(item.timestamp)}</td>"
+        f"<td>{escape(item.source)}</td>"
+        f"<td>{escape(item.location)}</td>"
+        f"<td>{escape(item.event)}</td>"
+        "</tr>"
+        for item in report.failure_timeline
+    ]
+    return _section(
+        "Failure Timeline",
+        "<table><thead><tr><th>Timestamp</th><th>Source</th>"
+        "<th>Location</th><th>Event</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>",
+    )
+
+
+def _cascading_errors(report: DiagnosisReport) -> str:
+    if not report.cascading_errors:
+        return _section("Cascading Errors", "<p>No cascading errors returned.</p>")
+    rows = []
+    for item in report.cascading_errors:
+        line = "" if item.line is None else f":{item.line}"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(item.path + line)}</td>"
+            f"<td><code>{escape(item.excerpt)}</code></td>"
+            "</tr>"
+        )
+    return _section(
+        "Cascading Errors",
+        "<table><thead><tr><th>Source</th><th>Excerpt</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>",
+    )
+
+
+def _alternatives_considered(report: DiagnosisReport) -> str:
+    if not report.alternatives_considered:
+        return _section("Alternatives Considered", "<p>No alternatives returned.</p>")
+    rows = [
+        "<tr>"
+        f"<td>{escape(item.hypothesis)}</td>"
+        f"<td>{escape(item.status)}</td>"
+        f"<td>{escape(item.reason)}</td>"
+        "</tr>"
+        for item in report.alternatives_considered
+    ]
+    return _section(
+        "Alternatives Considered",
+        "<table><thead><tr><th>Hypothesis</th><th>Status</th><th>Reason</th></tr>"
+        f"</thead><tbody>{''.join(rows)}</tbody></table>",
     )
 
 

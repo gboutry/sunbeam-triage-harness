@@ -110,3 +110,19 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
     assert "[result] confidence=supported summary=Offline summary" in result.stderr
     assert "[stage] render" in result.stderr
     assert str(tmp_path / "diagnostics-sample-uuid.html") in result.stdout
+
+
+def test_cli_accepts_budget_profile_argument():
+    from sunbeam_triage.cli import build_parser
+
+    args = build_parser().parse_args(["sample-uuid", "--budget", "quick"])
+
+    assert args.budget == "quick"
+
+
+def test_cli_accepts_max_tool_rounds_argument():
+    from sunbeam_triage.cli import build_parser
+
+    args = build_parser().parse_args(["sample-uuid", "--max-tool-rounds", "9"])
+
+    assert args.max_tool_rounds == 9

@@ -14,6 +14,14 @@ base_url = "https://swift.example/v1/AUTH/container"
 model = "configured/model"
 api_key_env = "CUSTOM_OPENROUTER_KEY"
 
+[triage]
+quick_max_rounds = 4
+default_max_rounds = 11
+hard_max_rounds = 17
+stall_limit = 2
+min_evidence_items = 3
+max_tool_result_chars = 42000
+
 [paths]
 artifact_root = "cache"
 output_pattern = "report-{uuid}.html"
@@ -28,6 +36,12 @@ output_pattern = "report-{uuid}.html"
     assert config.swift.base_url == "https://swift.example/v1/AUTH/container"
     assert config.llm.model == "cli/model"
     assert config.llm.api_key == "secret-token"
+    assert config.triage.quick_max_rounds == 4
+    assert config.triage.default_max_rounds == 11
+    assert config.triage.hard_max_rounds == 17
+    assert config.triage.stall_limit == 2
+    assert config.triage.min_evidence_items == 3
+    assert config.triage.max_tool_result_chars == 42000
     assert config.paths.artifact_root == Path("cache")
     assert config.output_path("abc") == Path("report-abc.html")
 

@@ -6,6 +6,7 @@ import pytest
 
 from sunbeam_triage.config import Config
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
+from sunbeam_triage.triage_state import TriageLoopOptions
 
 
 class FakeSdkResponse:
@@ -154,11 +155,63 @@ def test_diagnosis_report_defaults_needs_more_evidence_for_old_payloads():
     assert report.needs_more_evidence is False
 
 
+def test_diagnosis_report_reads_optional_triage_v2_fields():
+    report = DiagnosisReport.from_dict(
+        {
+            "summary": "summary",
+            "failure_surface": "surface",
+            "confidence": "supported",
+            "root_cause": "cause",
+            "triage_confidence": "medium",
+            "failure_timeline": [
+                {
+                    "timestamp": "10:42:29",
+                    "source": "rabbitmq.log",
+                    "location": "line 120",
+                    "event": "RabbitMQ closed the connection.",
+                }
+            ],
+            "cascading_errors": [
+                {
+                    "path": "nova-api.log",
+                    "line": 1242,
+                    "excerpt": "oslo.messaging timeout",
+                }
+            ],
+            "alternatives_considered": [
+                {
+                    "hypothesis": "Database outage",
+                    "status": "less_likely",
+                    "reason": "No DB errors near the first failure timestamp.",
+                }
+            ],
+            "missing_evidence": ["Need neutron-server timing."],
+            "stop_reason": "sufficient_evidence",
+        }
+    )
+
+    assert report.triage_confidence == "medium"
+    assert report.failure_timeline[0].source == "rabbitmq.log"
+    assert report.cascading_errors[0].path == "nova-api.log"
+    assert report.alternatives_considered[0].hypothesis == "Database outage"
+    assert report.missing_evidence == ["Need neutron-server timing."]
+    assert report.stop_reason == "sufficient_evidence"
+
+
 def test_report_schema_requires_needs_more_evidence():
     assert "needs_more_evidence" in REPORT_SCHEMA["schema"]["required"]
     assert REPORT_SCHEMA["schema"]["properties"]["needs_more_evidence"] == {
         "type": "boolean"
     }
+    for field in (
+        "triage_confidence",
+        "failure_timeline",
+        "cascading_errors",
+        "alternatives_considered",
+        "missing_evidence",
+        "stop_reason",
+    ):
+        assert field in REPORT_SCHEMA["schema"]["required"]
 
 
 def test_openrouter_client_sends_follow_up_chat_with_sdk_session_id():
@@ -303,12 +356,13 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert first_call["tools"][0]["function"]["name"] == "list_artifact_files"
     assert first_call["parallel_tool_calls"] is False
     assert report.summary == "The deploy step timed out."
-    assert second_call["messages"][-2]["role"] == "tool"
-    assert second_call["messages"][-2]["tool_call_id"] == "call-1"
-    assert "generated/sunbeam/output.log" in second_call["messages"][-2]["content"]
-    assert second_call["messages"][-1]["role"] == "tool"
-    assert second_call["messages"][-1]["tool_call_id"] == "call-2"
-    assert "wait timed out" in second_call["messages"][-1]["content"]
+    tool_messages = [
+        message for message in second_call["messages"] if message["role"] == "tool"
+    ]
+    assert tool_messages[0]["tool_call_id"] == "call-1"
+    assert "generated/sunbeam/output.log" in tool_messages[0]["content"]
+    assert tool_messages[1]["tool_call_id"] == "call-2"
+    assert "wait timed out" in tool_messages[1]["content"]
     assert sdk.chat.calls[0]["tools"] == client.exchanges[0]["request"]["tools"]
     assert client.exchanges[0]["response"]["tool_calls"][0]["id"] == "call-1"
     assert "wait timed out" in client.exchanges[1]["request"]["messages"][-1]["content"]
@@ -345,8 +399,10 @@ def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     assert answer == "The failure detail confirms the timeout."
     assert sdk.chat.calls[0]["tools"][1]["function"]["name"] == "get_artifact_file"
     assert sdk.chat.calls[0]["parallel_tool_calls"] is False
-    assert sdk.chat.calls[1]["messages"][-1]["role"] == "tool"
-    assert "failure detail" in sdk.chat.calls[1]["messages"][-1]["content"]
+    tool_messages = [
+        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+    ]
+    assert "failure detail" in tool_messages[-1]["content"]
 
 
 def test_openrouter_client_trims_large_tool_results_by_budget(tmp_path):
@@ -377,12 +433,15 @@ def test_openrouter_client_trims_large_tool_results_by_budget(tmp_path):
         max_tool_result_chars=180,
     )
 
-    tool_result = json.loads(sdk.chat.calls[1]["messages"][-1]["content"])
+    tool_messages = [
+        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+    ]
+    tool_result = json.loads(tool_messages[-1]["content"])
     assert answer == "I have enough context."
     assert tool_result["ok"] is True
     assert tool_result["tool_result_truncated_by_budget"] is True
     assert len(tool_result["content"]) < 100
-    assert len(sdk.chat.calls[1]["messages"][-1]["content"]) <= 180
+    assert len(tool_messages[-1]["content"]) <= 180
 
 
 def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
@@ -803,9 +862,11 @@ def test_openrouter_client_nudges_targeted_read_after_broad_tool_only_round(
     )
 
     followup_messages = sdk.chat.calls[1]["messages"]
-    assert followup_messages[-1]["role"] == "user"
-    assert "targeted read" in followup_messages[-1]["content"]
-    assert "get_artifact_file" in followup_messages[-1]["content"]
+    user_messages = [
+        message for message in followup_messages if message["role"] == "user"
+    ]
+    assert any("targeted read" in message["content"] for message in user_messages)
+    assert any("get_artifact_file" in message["content"] for message in user_messages)
 
 
 def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
@@ -851,8 +912,10 @@ def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
     assert answer == "The remote command completed."
     tool_names = [tool["function"]["name"] for tool in sdk.chat.calls[0]["tools"]]
     assert "search_sosreport" in tool_names
-    assert sdk.chat.calls[1]["messages"][-1]["role"] == "tool"
-    assert "ResultType.COMPLETED" in sdk.chat.calls[1]["messages"][-1]["content"]
+    tool_messages = [
+        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+    ]
+    assert "ResultType.COMPLETED" in tool_messages[-1]["content"]
 
 
 def test_openrouter_client_answers_without_tools_after_max_tool_rounds(tmp_path):
@@ -875,10 +938,65 @@ def test_openrouter_client_answers_without_tools_after_max_tool_rounds(tmp_path)
 
     assert answer == "Answering with the available context."
     assert sdk.chat.calls[0]["tools"][0]["function"]["name"] == "list_artifact_files"
-    assert "tools" not in sdk.chat.calls[1]
-    assert "tool_choice" not in sdk.chat.calls[1]
-    assert "parallel_tool_calls" not in sdk.chat.calls[1]
-    assert "tool budget is exhausted" in sdk.chat.calls[1]["messages"][-1]["content"]
+    assert "tools" in sdk.chat.calls[1]
+    assert sdk.chat.calls[1]["tool_choice"] == "none"
+    assert sdk.chat.calls[1]["parallel_tool_calls"] is False
+    assert "budget_exhausted" in sdk.chat.calls[1]["messages"][-1]["content"]
+
+
+def test_openrouter_client_defaults_to_twelve_tool_rounds_before_partial_final(
+    tmp_path,
+):
+    responses = [
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall(f"call-{index}", "list_artifact_files", "{}")],
+        )
+        for index in range(12)
+    ]
+    responses.append(FakeSdkResponse("Answering with partial findings."))
+    sdk = FakeSdkClient(responses)
+
+    answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=tmp_path,
+        triage_options=TriageLoopOptions(
+            max_rounds=12,
+            hard_max_rounds=20,
+            stall_limit=20,
+        ),
+    )
+
+    assert answer == "Answering with partial findings."
+    assert len(sdk.chat.calls) == 13
+    assert sdk.chat.calls[-1]["tool_choice"] == "none"
+    assert "tools" in sdk.chat.calls[-1]
+    assert "budget_exhausted" in sdk.chat.calls[-1]["messages"][-1]["content"]
+
+
+def test_openrouter_client_finalizes_after_stalled_tool_progress(tmp_path):
+    responses = [
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall(f"call-{index}", "list_artifact_files", "{}")],
+        )
+        for index in range(3)
+    ]
+    responses.append(FakeSdkResponse("Answering after stall."))
+    sdk = FakeSdkClient(responses)
+
+    answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=tmp_path,
+        max_tool_rounds=12,
+    )
+
+    assert answer == "Answering after stall."
+    assert len(sdk.chat.calls) == 4
+    assert sdk.chat.calls[-1]["tool_choice"] == "none"
+    assert "stalled" in sdk.chat.calls[-1]["messages"][-1]["content"]
 
 
 def _write_tar_member(path, name, content):

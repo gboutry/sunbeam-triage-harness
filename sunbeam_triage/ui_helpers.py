@@ -139,6 +139,8 @@ def build_followup_context(
         f"Diagnosis Summary: {report.summary}",
         f"Failure Surface: {report.failure_surface}",
         f"Confidence: {report.confidence}",
+        f"Triage Confidence: {report.triage_confidence}",
+        f"Stop Reason: {report.stop_reason}",
         f"Root Cause: {report.root_cause}",
         "",
         "Model Evidence:",
@@ -156,6 +158,29 @@ def build_followup_context(
     if report.unknowns:
         parts.extend(["", "Unknowns:"])
         parts.extend(f"- {item}" for item in report.unknowns)
+    if report.failure_timeline:
+        parts.extend(["", "Failure Timeline:"])
+        parts.extend(
+            (
+                f"- {item.timestamp} {item.source} {item.location}: "
+                f"{item.event}"
+            )
+            for item in report.failure_timeline
+        )
+    if report.cascading_errors:
+        parts.extend(["", "Cascading Errors:"])
+        for item in report.cascading_errors:
+            line = "" if item.line is None else f":{item.line}"
+            parts.append(f"- {item.path}{line}: {item.excerpt}")
+    if report.alternatives_considered:
+        parts.extend(["", "Alternatives Considered:"])
+        parts.extend(
+            f"- {item.hypothesis} ({item.status}): {item.reason}"
+            for item in report.alternatives_considered
+        )
+    if report.missing_evidence:
+        parts.extend(["", "Missing Evidence:"])
+        parts.extend(f"- {item}" for item in report.missing_evidence)
     if attachments:
         parts.extend(["", "Attached Context:"])
         for item in attachments:

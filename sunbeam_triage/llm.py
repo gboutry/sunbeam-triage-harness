@@ -9,6 +9,13 @@ from openrouter import OpenRouter
 
 from .artifact_tools import artifact_tool_definitions, execute_artifact_tool
 from .config import LlmConfig
+from .triage_state import (
+    BudgetProfile,
+    InvestigationState,
+    TriageLoopOptions,
+    observe_tool_result,
+    resolve_triage_budget,
+)
 
 
 EVIDENCE_PRODUCING_TOOLS = {
@@ -43,6 +50,21 @@ class CandidateMechanism:
 
 
 @dataclass(frozen=True)
+class TimelineEvent:
+    timestamp: str
+    source: str
+    location: str
+    event: str
+
+
+@dataclass(frozen=True)
+class AlternativeConsidered:
+    hypothesis: str
+    status: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class DiagnosisReport:
     summary: str
     failure_surface: str
@@ -53,6 +75,12 @@ class DiagnosisReport:
     candidate_mechanisms: list[CandidateMechanism] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
     unknowns: list[str] = field(default_factory=list)
+    triage_confidence: str = "unknown"
+    failure_timeline: list[TimelineEvent] = field(default_factory=list)
+    cascading_errors: list[ReportEvidence] = field(default_factory=list)
+    alternatives_considered: list[AlternativeConsidered] = field(default_factory=list)
+    missing_evidence: list[str] = field(default_factory=list)
+    stop_reason: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DiagnosisReport":
@@ -84,6 +112,39 @@ class DiagnosisReport:
                 str(item) for item in data.get("recommendations", []) if item is not None
             ],
             unknowns=[str(item) for item in data.get("unknowns", []) if item is not None],
+            triage_confidence=str(data.get("triage_confidence", "unknown")),
+            failure_timeline=[
+                TimelineEvent(
+                    timestamp=str(item.get("timestamp", "")),
+                    source=str(item.get("source", "")),
+                    location=str(item.get("location", "")),
+                    event=str(item.get("event", "")),
+                )
+                for item in data.get("failure_timeline", [])
+                if isinstance(item, dict)
+            ],
+            cascading_errors=[
+                ReportEvidence(
+                    path=str(item.get("path", "")),
+                    line=item.get("line"),
+                    excerpt=str(item.get("excerpt", "")),
+                )
+                for item in data.get("cascading_errors", [])
+                if isinstance(item, dict)
+            ],
+            alternatives_considered=[
+                AlternativeConsidered(
+                    hypothesis=str(item.get("hypothesis", "")),
+                    status=str(item.get("status", "")),
+                    reason=str(item.get("reason", "")),
+                )
+                for item in data.get("alternatives_considered", [])
+                if isinstance(item, dict)
+            ],
+            missing_evidence=[
+                str(item) for item in data.get("missing_evidence", []) if item is not None
+            ],
+            stop_reason=str(data.get("stop_reason", "")),
         )
 
 
@@ -103,6 +164,12 @@ REPORT_SCHEMA = {
             "candidate_mechanisms",
             "recommendations",
             "unknowns",
+            "triage_confidence",
+            "failure_timeline",
+            "cascading_errors",
+            "alternatives_considered",
+            "missing_evidence",
+            "stop_reason",
         ],
         "properties": {
             "summary": {"type": "string"},
@@ -144,6 +211,52 @@ REPORT_SCHEMA = {
             },
             "recommendations": {"type": "array", "items": {"type": "string"}},
             "unknowns": {"type": "array", "items": {"type": "string"}},
+            "triage_confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low", "unknown"],
+            },
+            "failure_timeline": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["timestamp", "source", "location", "event"],
+                    "properties": {
+                        "timestamp": {"type": "string"},
+                        "source": {"type": "string"},
+                        "location": {"type": "string"},
+                        "event": {"type": "string"},
+                    },
+                },
+            },
+            "cascading_errors": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "line", "excerpt"],
+                    "properties": {
+                        "path": {"type": "string"},
+                        "line": {"type": ["integer", "null"]},
+                        "excerpt": {"type": "string"},
+                    },
+                },
+            },
+            "alternatives_considered": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["hypothesis", "status", "reason"],
+                    "properties": {
+                        "hypothesis": {"type": "string"},
+                        "status": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+            "missing_evidence": {"type": "array", "items": {"type": "string"}},
+            "stop_reason": {"type": "string"},
         },
     },
 }
@@ -161,8 +274,9 @@ class OpenRouterClient:
         *,
         session_id: str | None = None,
         artifact_root: Path | None = None,
-        max_tool_rounds: int = 4,
+        max_tool_rounds: int | None = None,
         max_tool_result_chars: int = 60_000,
+        triage_options: TriageLoopOptions | None = None,
     ) -> DiagnosisReport:
         request = {
             "model": self.config.model,
@@ -174,6 +288,11 @@ class OpenRouterClient:
                         "evidence. Do not invent files, timestamps, or causes. "
                         "Actively inspect the next likely decisive artifact when "
                         "the current evidence only identifies a wrapper failure. "
+                        "Prefer the first meaningful error over the final visible "
+                        "stack trace. Separate direct evidence from inference, "
+                        "use timestamps to correlate services, identify cascades "
+                        "when possible, and check at least one plausible "
+                        "alternative before claiming high confidence. "
                         "Use search_artifacts before reading whole files. For "
                         "sosreport archives, use search_sosreport before reading "
                         "a specific member. Prefer line windows over full file "
@@ -197,6 +316,7 @@ class OpenRouterClient:
             artifact_root=artifact_root,
             max_tool_rounds=max_tool_rounds,
             max_tool_result_chars=max_tool_result_chars,
+            triage_options=triage_options,
         )
         data = _response_json(response)
         has_tool_budget_fallback = _exchange_range_has_tool_budget_fallback(
@@ -225,6 +345,7 @@ class OpenRouterClient:
                 artifact_root=artifact_root,
                 max_tool_rounds=max_tool_rounds,
                 max_tool_result_chars=max_tool_result_chars,
+                triage_options=triage_options,
                 tool_choice="required",
             )
             data = _response_json(response)
@@ -262,8 +383,9 @@ class OpenRouterClient:
         *,
         session_id: str | None = None,
         artifact_root: Path | None = None,
-        max_tool_rounds: int = 4,
+        max_tool_rounds: int | None = None,
         max_tool_result_chars: int = 60_000,
+        triage_options: TriageLoopOptions | None = None,
     ) -> str:
         request = {
             "model": self.config.model,
@@ -275,7 +397,11 @@ class OpenRouterClient:
                         "Use the provided diagnosis context and evidence. "
                         "Separate evidence from inference. Actively inspect the "
                         "next likely decisive artifact when the current context "
-                        "only identifies a wrapper failure. Use search_artifacts "
+                        "only identifies a wrapper failure. "
+                        "Prefer the first meaningful error over later cascading "
+                        "failures, correlate timestamps across logs, and preserve "
+                        "uncertainty when evidence is incomplete. "
+                        "Use search_artifacts "
                         "before reading whole files. For sosreport archives, use "
                         "search_sosreport before reading a specific member. "
                         "Prefer line windows over full file reads. Read a "
@@ -295,6 +421,7 @@ class OpenRouterClient:
             artifact_root=artifact_root,
             max_tool_rounds=max_tool_rounds,
             max_tool_result_chars=max_tool_result_chars,
+            triage_options=triage_options,
         )
         return _response_content(response)
 
@@ -303,8 +430,9 @@ class OpenRouterClient:
         request: dict[str, Any],
         *,
         artifact_root: Path | None,
-        max_tool_rounds: int,
+        max_tool_rounds: int | None,
         max_tool_result_chars: int,
+        triage_options: TriageLoopOptions | None = None,
         tool_choice: str = "auto",
     ):
         if artifact_root is None:
@@ -312,31 +440,52 @@ class OpenRouterClient:
             self._record_exchange(request, response)
             return response
 
+        options = triage_options or resolve_triage_budget(
+            BudgetProfile(max_tool_result_chars=max_tool_result_chars),
+            max_tool_rounds=max_tool_rounds,
+        )
+        state = InvestigationState(options=options)
         request = {
             **request,
             "tools": artifact_tool_definitions(),
             "tool_choice": tool_choice,
             "parallel_tool_calls": False,
         }
-        for _ in range(max_tool_rounds):
+        for _ in range(options.max_rounds):
             response = self._send(request)
             self._record_exchange(request, response)
             tool_calls = _tool_calls(response)
             if not tool_calls:
                 return response
+            tool_result_messages = _tool_result_messages(
+                artifact_root,
+                tool_calls,
+                max_chars=options.max_tool_result_chars,
+            )
+            state.record_round()
+            for tool_call, message in zip(tool_calls, tool_result_messages, strict=False):
+                name, arguments = _tool_call_name_and_arguments(tool_call)
+                state.apply_observation(
+                    observe_tool_result(name, arguments, str(message.get("content", "")))
+                )
             request["messages"] = [
                 *request["messages"],
                 _assistant_tool_message(response),
-                *_tool_result_messages(
-                    artifact_root,
-                    tool_calls,
-                    max_chars=max_tool_result_chars,
-                ),
+                *tool_result_messages,
             ]
             if _tool_calls_need_targeted_read_nudge(tool_calls):
                 request["messages"].append(_targeted_read_nudge_message())
+            request["messages"].append(_investigation_state_message(state))
+            if state.should_finalize():
+                final_request = _final_request_with_state(request, state)
+                response = self._send(final_request)
+                self._record_exchange(final_request, response)
+                return response
 
-        final_request = _final_request_without_artifact_tools(request)
+        if not state.stop_reason:
+            state.stop_reason = "budget_exhausted"
+            state.phase = "finalisation"
+        final_request = _final_request_with_state(request, state)
         response = self._send(final_request)
         self._record_exchange(final_request, response)
         return response
@@ -473,8 +622,6 @@ def _exchange_range_has_tool_budget_fallback(
         request = exchange.get("request", {})
         if not isinstance(request, dict):
             continue
-        if "tools" in request:
-            continue
         for message in request.get("messages", []):
             if not isinstance(message, dict):
                 continue
@@ -583,6 +730,19 @@ def _targeted_read_nudge_message() -> dict[str, str]:
     }
 
 
+def _investigation_state_message(state: InvestigationState) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": (
+            "Current harness investigation state after the last tool round:\n"
+            f"{state.to_prompt_summary()}\n"
+            "Use this state to avoid repeating unproductive searches. Continue "
+            "only if the next tool call is likely to add new evidence, refine "
+            "the failure timeline, or check a plausible alternative."
+        ),
+    }
+
+
 def _tool_calls(response: Any) -> list[Any]:
     choice = response.choices[0]
     message = choice.message
@@ -672,23 +832,29 @@ def _tool_result_content(result: dict[str, Any], *, max_chars: int) -> str:
     return TOOL_RESULT_TRUNCATED_MARKER
 
 
-def _final_request_without_artifact_tools(request: dict[str, Any]) -> dict[str, Any]:
-    final_request = {
-        key: value
-        for key, value in request.items()
-        if key not in {"tools", "tool_choice", "parallel_tool_calls"}
-    }
+def _final_request_with_state(
+    request: dict[str, Any],
+    state: InvestigationState,
+) -> dict[str, Any]:
+    final_request = dict(request)
+    final_request["tool_choice"] = "none"
     final_request["messages"] = [
         *final_request["messages"],
         {
             "role": "user",
             "content": (
-                "The artifact tool budget is exhausted. Answer now using the "
-                "initial evidence and any artifact tool results already "
-                "provided. Do not request more files. Do not mark a diagnosis "
-                "confirmed solely from discovery-only tool results; preserve "
-                "uncertainty when targeted files or sosreport members were not "
-                "read."
+                "Finalize the triage now because the harness stopping rule "
+                f"triggered: {state.stop_reason}. The artifact tool budget is "
+                "exhausted if stop_reason is budget_exhausted. Answer using "
+                "the initial evidence, tool results already provided, and this "
+                f"investigation state: {state.to_prompt_summary()}. Do not "
+                "request more files. Prefer the first meaningful error over "
+                "later cascades. Separate evidence from inference. Include a "
+                "partial but useful conclusion, confidence, missing evidence, "
+                "alternatives considered or unchecked due budget, and "
+                "recommended next checks. Do not mark a diagnosis confirmed "
+                "solely from discovery-only tool results; preserve uncertainty "
+                "when targeted files or sosreport members were not read."
             ),
         },
     ]

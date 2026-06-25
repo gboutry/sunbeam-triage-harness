@@ -13,6 +13,7 @@ from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
 from sunbeam_triage.render import render_html
 from sunbeam_triage.swift import SwiftMirror
 from sunbeam_triage.tool_activity import analyze_tool_activity
+from sunbeam_triage.triage_state import BudgetProfile, resolve_triage_budget
 from sunbeam_triage.ui_helpers import (
     build_followup_context,
     evidence_line_map,
@@ -84,9 +85,20 @@ def _sidebar(config: Config) -> str:
         with st.form("start-diagnosis", clear_on_submit=False):
             uuid = st.text_input("Solutions Run UUID")
             model = st.text_input("Model", value=config.llm.model)
+            budget = st.selectbox(
+                "Budget",
+                ["default", "quick", "hard"],
+                index=0,
+                help="Tool-round budget profile for the diagnosis loop.",
+            )
             submitted = st.form_submit_button("Start diagnosis", type="primary")
         if submitted:
-            _start_diagnosis(config, uuid.strip(), model.strip() or config.llm.model)
+            _start_diagnosis(
+                config,
+                uuid.strip(),
+                model.strip() or config.llm.model,
+                budget,
+            )
 
         st.divider()
         query = st.text_input("Search history")
@@ -107,12 +119,23 @@ def _sidebar(config: Config) -> str:
     return st.session_state.get("selected_uuid", "")
 
 
-def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
+def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None:
     if not uuid:
         st.sidebar.error("Enter a Solutions Run UUID.")
         return
 
     run_config = Config.load("config.toml", cli_model=model)
+    triage_options = resolve_triage_budget(
+        BudgetProfile(
+            quick_max_rounds=run_config.triage.quick_max_rounds,
+            default_max_rounds=run_config.triage.default_max_rounds,
+            hard_max_rounds=run_config.triage.hard_max_rounds,
+            stall_limit=run_config.triage.stall_limit,
+            min_evidence_items=run_config.triage.min_evidence_items,
+            max_tool_result_chars=run_config.triage.max_tool_result_chars,
+        ),
+        budget=budget,
+    )
     artifact_root = run_config.paths.artifact_root / uuid
     llm_client = OpenRouterClient(run_config.llm)
 
@@ -167,6 +190,9 @@ def _start_diagnosis(config: Config, uuid: str, model: str) -> None:
                 pack.to_prompt_text(),
                 session_id=uuid,
                 artifact_root=artifact_root,
+                max_tool_rounds=triage_options.max_rounds,
+                max_tool_result_chars=triage_options.max_tool_result_chars,
+                triage_options=triage_options,
             )
 
             output = run_config.output_path(uuid)
@@ -426,6 +452,14 @@ def _session_from_diagnosis(
         "candidate_mechanisms": [asdict(item) for item in report.candidate_mechanisms],
         "recommendations": report.recommendations,
         "unknowns": report.unknowns,
+        "triage_confidence": report.triage_confidence,
+        "failure_timeline": [asdict(item) for item in report.failure_timeline],
+        "cascading_errors": [asdict(item) for item in report.cascading_errors],
+        "alternatives_considered": [
+            asdict(item) for item in report.alternatives_considered
+        ],
+        "missing_evidence": report.missing_evidence,
+        "stop_reason": report.stop_reason,
         "chat": [],
         "exchanges": exchanges,
         "download_failures": download_failures,
@@ -444,6 +478,12 @@ def _report_from_session(session: dict[str, Any]) -> DiagnosisReport:
             "candidate_mechanisms": session.get("candidate_mechanisms", []),
             "recommendations": session.get("recommendations", []),
             "unknowns": session.get("unknowns", []),
+            "triage_confidence": session.get("triage_confidence", "unknown"),
+            "failure_timeline": session.get("failure_timeline", []),
+            "cascading_errors": session.get("cascading_errors", []),
+            "alternatives_considered": session.get("alternatives_considered", []),
+            "missing_evidence": session.get("missing_evidence", []),
+            "stop_reason": session.get("stop_reason", ""),
         }
     )
 

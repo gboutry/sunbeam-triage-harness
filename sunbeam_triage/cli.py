@@ -9,6 +9,7 @@ from .evidence import EvidenceCollector
 from .llm import DiagnosisReport, OpenRouterClient
 from .render import render_html
 from .swift import SwiftMirror
+from .triage_state import BudgetProfile, resolve_triage_budget
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,6 +28,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm-json",
         help="Use a precomputed diagnosis JSON payload instead of calling OpenRouter",
+    )
+    parser.add_argument(
+        "--budget",
+        choices=["quick", "default", "hard"],
+        default="default",
+        help="Triage tool-round budget profile",
+    )
+    parser.add_argument(
+        "--max-tool-rounds",
+        type=int,
+        help="Override the selected triage budget round count",
     )
     return parser
 
@@ -64,11 +76,26 @@ def main(argv: list[str] | None = None) -> int:
         _log("stage", "diagnosis using supplied JSON")
         report = DiagnosisReport.from_dict(json.loads(args.llm_json))
     else:
+        triage_options = resolve_triage_budget(
+            BudgetProfile(
+                quick_max_rounds=config.triage.quick_max_rounds,
+                default_max_rounds=config.triage.default_max_rounds,
+                hard_max_rounds=config.triage.hard_max_rounds,
+                stall_limit=config.triage.stall_limit,
+                min_evidence_items=config.triage.min_evidence_items,
+                max_tool_result_chars=config.triage.max_tool_result_chars,
+            ),
+            budget=args.budget,
+            max_tool_rounds=args.max_tool_rounds,
+        )
         _log("stage", f"diagnosis requesting model={config.llm.model}")
         report = OpenRouterClient(config.llm).diagnose(
             pack.to_prompt_text(),
             session_id=uuid,
             artifact_root=artifact_root,
+            max_tool_rounds=triage_options.max_rounds,
+            max_tool_result_chars=triage_options.max_tool_result_chars,
+            triage_options=triage_options,
         )
     _log("result", f"confidence={report.confidence} summary={report.summary}")
 

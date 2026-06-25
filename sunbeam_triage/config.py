@@ -29,6 +29,16 @@ class LlmConfig:
 
 
 @dataclass
+class TriageConfig:
+    quick_max_rounds: int = 5
+    default_max_rounds: int = 12
+    hard_max_rounds: int = 20
+    stall_limit: int = 3
+    min_evidence_items: int = 2
+    max_tool_result_chars: int = 60_000
+
+
+@dataclass
 class PathConfig:
     artifact_root: Path = Path("artifacts")
     output_pattern: str = "diagnostics-{uuid}.html"
@@ -38,6 +48,7 @@ class PathConfig:
 class Config:
     swift: SwiftConfig = field(default_factory=SwiftConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
+    triage: TriageConfig = field(default_factory=TriageConfig)
     paths: PathConfig = field(default_factory=PathConfig)
 
     @classmethod
@@ -68,6 +79,26 @@ class Config:
         config.llm.api_key_env = str(llm.get("api_key_env", config.llm.api_key_env))
         config.llm.timeout_seconds = int(
             llm.get("timeout_seconds", config.llm.timeout_seconds)
+        )
+
+        triage = data.get("triage", {})
+        config.triage.quick_max_rounds = int(
+            triage.get("quick_max_rounds", config.triage.quick_max_rounds)
+        )
+        config.triage.default_max_rounds = int(
+            triage.get("default_max_rounds", config.triage.default_max_rounds)
+        )
+        config.triage.hard_max_rounds = int(
+            triage.get("hard_max_rounds", config.triage.hard_max_rounds)
+        )
+        config.triage.stall_limit = int(
+            triage.get("stall_limit", config.triage.stall_limit)
+        )
+        config.triage.min_evidence_items = int(
+            triage.get("min_evidence_items", config.triage.min_evidence_items)
+        )
+        config.triage.max_tool_result_chars = int(
+            triage.get("max_tool_result_chars", config.triage.max_tool_result_chars)
         )
 
         paths = data.get("paths", {})

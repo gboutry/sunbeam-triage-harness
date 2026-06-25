@@ -133,3 +133,59 @@ def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
     assert session["needs_more_evidence"] is True
     assert app._report_from_session(session).needs_more_evidence is True
     assert app._report_from_session({"summary": "old"}).needs_more_evidence is False
+
+
+def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
+    app = _streamlit_app()
+    report = DiagnosisReport.from_dict(
+        {
+            "summary": "Timed out",
+            "failure_surface": "Deploy timeout",
+            "confidence": "supported",
+            "root_cause": "RabbitMQ closed first.",
+            "triage_confidence": "medium",
+            "failure_timeline": [
+                {
+                    "timestamp": "10:42:29",
+                    "source": "rabbitmq.log",
+                    "location": "line 120",
+                    "event": "RabbitMQ closed AMQP connection.",
+                }
+            ],
+            "cascading_errors": [
+                {
+                    "path": "nova-api.log",
+                    "line": 1242,
+                    "excerpt": "oslo.messaging timeout",
+                }
+            ],
+            "alternatives_considered": [
+                {
+                    "hypothesis": "Database outage",
+                    "status": "less_likely",
+                    "reason": "No DB errors near first failure timestamp.",
+                }
+            ],
+            "missing_evidence": ["Need neutron-server timing."],
+            "stop_reason": "sufficient_evidence",
+        }
+    )
+
+    session = app._session_from_diagnosis(
+        uuid="uuid",
+        model="model/a",
+        artifact_root=tmp_path / "uuid",
+        output=tmp_path / "diagnostics.html",
+        failed_step="sunbeam_test",
+        report=report,
+        exchanges=[],
+        download_failures=[],
+    )
+    loaded = app._report_from_session(session)
+
+    assert session["triage_confidence"] == "medium"
+    assert loaded.failure_timeline[0].source == "rabbitmq.log"
+    assert loaded.cascading_errors[0].path == "nova-api.log"
+    assert loaded.alternatives_considered[0].hypothesis == "Database outage"
+    assert loaded.missing_evidence == ["Need neutron-server timing."]
+    assert loaded.stop_reason == "sufficient_evidence"
