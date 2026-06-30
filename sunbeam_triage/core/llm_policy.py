@@ -7,11 +7,19 @@ from .llm_exchanges import tool_call_name_and_arguments
 EVIDENCE_PRODUCING_TOOLS = {
     "search_artifacts",
     "get_artifact_file",
+    "search_archive",
+    "get_archive_file",
     "search_sosreport",
+    "get_sosreport_file",
+}
+TARGETED_READ_TOOLS = {
+    "get_artifact_file",
+    "get_archive_file",
     "get_sosreport_file",
 }
 DISCOVERY_TOOLS = {
     "list_artifact_files",
+    "list_archive_files",
     "list_sosreports",
     "list_sosreport_files",
 }
@@ -35,6 +43,13 @@ def exchange_range_has_evidence_tool_calls(
     return bool(
         exchange_range_tool_names(exchanges, start_index) & EVIDENCE_PRODUCING_TOOLS
     )
+
+
+def exchange_range_has_targeted_read_tool_calls(
+    exchanges: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    return bool(exchange_range_tool_names(exchanges, start_index) & TARGETED_READ_TOOLS)
 
 
 def exchange_range_tool_names(
@@ -82,6 +97,8 @@ def diagnosis_needs_required_tool_retry(
         start_index,
     ):
         return True
+    if data.get("confidence") == "confirmed":
+        return not exchange_range_has_evidence_tool_calls(exchanges, start_index)
     return diagnosis_confidence_requires_artifact_evidence(
         data
     ) and not exchange_range_has_evidence_tool_calls(exchanges, start_index)

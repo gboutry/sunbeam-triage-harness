@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .evidence_model import EvidenceObservation
 from .probes import ProbeResult, run_preflight_probes
 from .redaction import redact_text
 
@@ -55,6 +56,14 @@ class FailedStep:
 
 
 @dataclass(frozen=True)
+class StepSelection:
+    selected: FailedStep
+    confidence: str
+    rejected_cleanup: tuple[FailedStep, ...] = ()
+    rejected_post: tuple[FailedStep, ...] = ()
+
+
+@dataclass(frozen=True)
 class EvidenceItem:
     kind: str
     path: str
@@ -70,6 +79,8 @@ class EvidencePack:
     failed_step: FailedStep
     evidence: tuple[EvidenceItem, ...]
     probe_results: tuple[ProbeResult, ...] = ()
+    observations: tuple[EvidenceObservation, ...] = ()
+    step_selection: StepSelection | None = None
 
     def to_prompt_text(self, max_chars: int = 60000) -> str:
         parts = [
@@ -87,6 +98,19 @@ class EvidencePack:
         for item in self.evidence:
             line = "" if item.line is None else f":{item.line}"
             parts.append(f"- [{item.kind}] {item.path}{line}: {item.excerpt}")
+        if self.step_selection is not None:
+            parts.extend([
+                "",
+                "Step Selection:",
+                (
+                    f"- selected={self.step_selection.selected.name} "
+                    f"confidence={self.step_selection.confidence}"
+                ),
+            ])
+            for step in self.step_selection.rejected_cleanup:
+                parts.append(f"- rejected_cleanup={step.name}")
+            for step in self.step_selection.rejected_post:
+                parts.append(f"- rejected_post={step.name}")
         probe_lines = _probe_prompt_lines(self.probe_results)
         if probe_lines:
             parts.extend(["", "Deterministic Probes:", *probe_lines])
@@ -104,7 +128,8 @@ class EvidenceCollector:
     def collect(self) -> EvidencePack:
         jobs = self._read_json("generated/github-runner/jobs.json")
         job = self._primary_job(jobs)
-        step = self._first_failed_step(job)
+        selection = self._select_failed_step(job)
+        step = selection["selected_raw"]
         run = RunInfo(
             run_id=job.get("run_id"),
             repository="canonical/sqa-cloud-deployment-pipeline",
@@ -122,6 +147,16 @@ class EvidenceCollector:
             completed_at=step.get("completed_at"),
             family=self._step_family(step.get("name", "")),
         )
+        step_selection = StepSelection(
+            selected=failed,
+            confidence=selection["confidence"],
+            rejected_cleanup=tuple(
+                self._failed_step_from_raw(item) for item in selection["cleanup"]
+            ),
+            rejected_post=tuple(
+                self._failed_step_from_raw(item) for item in selection["post"]
+            ),
+        )
         evidence = self._collect_evidence(failed)
         probe_results = run_preflight_probes(self.root, self.uuid)
         return EvidencePack(
@@ -131,6 +166,7 @@ class EvidenceCollector:
             failed_step=failed,
             evidence=tuple(evidence),
             probe_results=probe_results,
+            step_selection=step_selection,
         )
 
     def _read_json(self, rel: str) -> dict[str, Any]:
@@ -153,14 +189,50 @@ class EvidenceCollector:
 
     @staticmethod
     def _first_failed_step(job: dict[str, Any]) -> dict[str, Any]:
+        return EvidenceCollector._select_failed_step(job)["selected_raw"]
+
+    @staticmethod
+    def _select_failed_step(job: dict[str, Any]) -> dict[str, Any]:
+        cleanup: list[dict[str, Any]] = []
+        post: list[dict[str, Any]] = []
+        selected: dict[str, Any] | None = None
         for step in job.get("steps", []):
             if step.get("conclusion") != "failure":
                 continue
             name = step.get("name", "")
-            if name in CLEANUP_STEP_NAMES or name.startswith("Post "):
+            if name.startswith("Post "):
+                post.append(step)
                 continue
-            return step
+            if name in CLEANUP_STEP_NAMES:
+                cleanup.append(step)
+                continue
+            selected = selected or step
+        if selected is not None:
+            return {
+                "selected_raw": selected,
+                "confidence": "high",
+                "cleanup": cleanup,
+                "post": post,
+            }
+        if cleanup or post:
+            return {
+                "selected_raw": [*cleanup, *post][0],
+                "confidence": "low",
+                "cleanup": cleanup,
+                "post": post,
+            }
         raise RuntimeError("No failed non-cleanup step found in jobs.json")
+
+    def _failed_step_from_raw(self, step: dict[str, Any]) -> FailedStep:
+        name = step.get("name", "unknown")
+        return FailedStep(
+            name=name,
+            number=step.get("number"),
+            conclusion=step.get("conclusion"),
+            started_at=step.get("started_at"),
+            completed_at=step.get("completed_at"),
+            family=self._step_family(name),
+        )
 
     def _step_family(self, name: str) -> str:
         if name.startswith("sunbeam_"):

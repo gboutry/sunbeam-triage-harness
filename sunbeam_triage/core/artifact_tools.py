@@ -8,9 +8,12 @@ from typing import Any
 
 from .redaction import redact_text
 from .sosreport_tools import (
+    get_archive_file,
     get_sosreport_file,
+    list_archive_files,
     list_sosreport_files,
     list_sosreports,
+    search_archive,
     search_sosreport,
 )
 
@@ -119,6 +122,69 @@ def artifact_tool_definitions() -> list[dict[str, Any]]:
                             "maximum": 500,
                             "description": "Maximum matching lines to return.",
                         },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_archive_files",
+                "description": (
+                    "List text members inside one tar archive such as pod logs or "
+                    "MAAS logs. Use a prefix to focus on likely useful areas."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["archive_path"],
+                    "properties": {
+                        "archive_path": {"type": "string"},
+                        "prefix": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_archive",
+                "description": (
+                    "Search text members inside one tar archive and return compact "
+                    "path:line excerpts."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["archive_path", "pattern"],
+                    "properties": {
+                        "archive_path": {"type": "string"},
+                        "pattern": {"type": "string"},
+                        "prefix": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_archive_file",
+                "description": (
+                    "Read bounded text from one tar archive member. Prefer narrow "
+                    "line windows."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["archive_path", "member_path"],
+                    "properties": {
+                        "archive_path": {"type": "string"},
+                        "member_path": {"type": "string"},
+                        "line_start": {"type": "integer", "minimum": 1},
+                        "line_count": {"type": "integer", "minimum": 1},
+                        "max_bytes": {"type": "integer", "minimum": 1, "maximum": MAX_BYTES_LIMIT},
                     },
                 },
             },
@@ -268,6 +334,12 @@ def execute_artifact_tool(
         return _get_artifact_file(root, arguments)
     if name == "search_artifacts":
         return _search_artifacts(root, arguments)
+    if name == "list_archive_files":
+        return list_archive_files(root, arguments)
+    if name == "search_archive":
+        return search_archive(root, arguments)
+    if name == "get_archive_file":
+        return get_archive_file(root, arguments)
     if name == "list_sosreports":
         return list_sosreports(root)
     if name == "list_sosreport_files":

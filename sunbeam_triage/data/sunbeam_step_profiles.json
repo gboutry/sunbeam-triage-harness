@@ -1,0 +1,1108 @@
+{
+  "profiles": {
+    "sunbeam_deploy": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "Terraform state lock contention during concurrent cluster joins",
+        "SSH \"Broken pipe\" during `sunbeam configure` (2-hour idle timeout)",
+        "Terraform Juju provider \"inconsistent result\" on `glance-to-ceph` during bootstrap",
+        "SSH \"Broken pipe\" during `sunbeam cluster join` (idle timeout, false failure)",
+        "Terraform apply timeout during `sunbeam configure` (Neutron API unreachable, 20-min hard timeout)",
+        "Traefik routes not ready \u2014 502 Bad Gateway during `sunbeam configure` (race after cluster joins)",
+        "\"No cilium pod found on node\" \u2014 node name FQDN vs. short hostname mismatch",
+        "`juju wait-for` HA timeout \u2014 HA controller machines deployed from scratch by MAAS",
+        "`cinder-volume` install hook blocks on `(amqp) integration missing` during parallel joins \u2014 20-minute wait expires",
+        "`k8s` cluster-relation-changed hooks + MetalLB/CSI pods not ready block parallel join wait \u2014 30-minute wait expires",
+        "`sunbeam cluster join` false failure \u2014 control-plane node never appears in deployment-labelled K8S node list",
+        "`sunbeam configure` hypervisor wait times out because bootstrap `sunbeam-machine/0` is permanently `lost` after controller migration / credential rotation",
+        "`sunbeam cluster join` false-negative \u2014 1200s wait expires while hypervisor hooks are still converging",
+        "`sunbeam configure` runs before Neutron finishes converging on a newly joined control-plane node",
+        "Charmhub docker-registry token API 503 causes bootstrap-time ImagePullBackOff across multiple charms",
+        "Snap Store assertion outage during storage-node join prevents `microceph` install and stalls model convergence",
+        "Silent bootstrap over SSH hits transport timeout on testflinger and surfaces as false failure",
+        "Runner-side DNS / SSH reachability loss during `sunbeam cluster bootstrap`",
+        "Bootstrap hits 3600s wait timeout after transient Keystone/Placement 502 leaves `nova` stuck in Bootstrapping",
+        "Bootstrap-node `snap install openstack` fails immediately with Snap Store HTTP 408",
+        "Juju controller charm download times out during bootstrap-node prepare phase",
+        "Parallel `sunbeam cluster join` false negative on `shared_maas` \u2014 1800s wait expires while later joins and storage/certificate hooks are still converging",
+        "Bootstrap hits 3600s wait timeout \u2014 `ovn-central/0` permanently blocked after `check_pebble_handlers_ready()` Pebble socket timeout",
+        "`sunbeam configure` hits Neutron EOF via Traefik while ingress providers are still not ready",
+        "`sunbeam cluster resize` hits 3600s wait timeout because `nova/1` never leaves Bootstrapping after MySQL-router refusals and Placement API errors",
+        "Earlier compute-node `openstack-hypervisor/3` ceph-access hook times out querying snapd, and a later storage-node join inherits the model timeout",
+        "Bootstrap hits 3600s wait timeout because traefik-rgw is stuck in error due to find/delete charm bug",
+        "cinder-volume service start-limit-hit during rapid subordinate relation hooks",
+        "`sunbeam cluster bootstrap` timeout (3600s) due to extreme network slowness / slow Kubernetes image pulls",
+        "`sunbeam prepare-node-script` fails with \"No external connectivity\" to `api.charmhub.io`",
+        "Parallel `sunbeam cluster join` false negative \u2014 1800s wait expires because joining unit is stuck 'Waiting for Cluster token' due to Juju controller relation event propagation delay"
+      ],
+      "name": "sunbeam_deploy",
+      "primary_artifacts": [
+        "generated/sunbeam/output.log",
+        "generated/sunbeam/juju_debug_log_openstack.txt",
+        "generated/sunbeam/juju_debug_log_openstack-machines.txt",
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/juju_status_openstack-machines.txt",
+        "generated/sunbeam/show_units_openstack.txt",
+        "generated/sunbeam/kubectl_get_pod.txt",
+        "generated/sunbeam/kubectl_get_pod_detailed.txt",
+        "generated/sunbeam/sunbeam_cluster_list.txt",
+        "generated/sunbeam/manifest.yaml",
+        "generated/sunbeam/sosreport-<node>.tar.xz"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_1",
+          "pattern": "ERROR\\|Failed\\|Traceback\\|CalledProcessError",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_2",
+          "pattern": "cluster join\\|cluster bootstrap\\|join.*failed\\|failed.*join",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_3",
+          "pattern": "terraform\\|state lock\\|Error acquiring",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_4",
+          "pattern": "k8s nodes\\|Failed to get k8s\\|nodes to update",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_5",
+          "pattern": "INFO|ERROR",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_6",
+          "pattern": "Node joined|Command failed.*cluster join",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/sunbeam_cluster_list.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_7",
+          "pattern": "chespin\\|<failing_node>",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_8",
+          "pattern": "ERROR|context deadline|retries exhausted|user_network",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_debug_log_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_9",
+          "pattern": "neutron.*pebble-check",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_10",
+          "pattern": "demo-setup/terraform-apply",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_11",
+          "pattern": "502\\|Bad Gateway\\|ERROR.*vertex",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_debug_log_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_12",
+          "pattern": "<configure-start-minute>",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_13",
+          "pattern": "pods\\|nodes",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_14",
+          "pattern": "cilium",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_16",
+          "pattern": "squashfs\\|netboot_off\\|deployed_os\\|DeployWorkflow",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_18",
+          "pattern": "15:24:5",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/sunbeam_cluster_list.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_19",
+          "pattern": "behaim\\|<failing_node>",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack-machines.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_20",
+          "pattern": "cinder-volume",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_21",
+          "pattern": "Node joined cluster",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/sunbeam_cluster_list.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_22",
+          "pattern": "anonster|crustle|<failing_nodes>",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack-machines.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_23",
+          "pattern": "k8s/",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_24",
+          "pattern": "Node joined cluster",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_25",
+          "pattern": "No matching k8s node found|Failed to get k8s nodes to update",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack-machines.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_26",
+          "pattern": "k8s/0|k8s/[123]|sunbeam-machine/0",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_27",
+          "pattern": "wait timed out after 1799\\|sunbeam-machine/0\\|openstack-hypervisor/2",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_28",
+          "pattern": "Apply complete|Waiting for apps|wait timed out",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_29",
+          "pattern": "migration phase|connection is shut down|invalid entity name or password",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_30",
+          "pattern": "wait timed out after 1199",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_31",
+          "pattern": "openstack-hypervisor/0\\|openstack-hypervisor/1\\|openstack-hypervisor/2\\|running config-changed hook",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_debug_log_openstack-machines.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_32",
+          "pattern": "08:52:22\\|08:52:56",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_33",
+          "pattern": "sunbeam cluster list\\|sunbeam configure -m manifest.yaml",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_34",
+          "pattern": "neutron.*healthcheck failed",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_35",
+          "pattern": "ImagePullBackOff",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/kubectl_get_pod_detailed.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_36",
+          "pattern": "tokens/docker-registry\\|503 Service Unavailable\\|failed to authorize",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_37",
+          "pattern": "wait timed out after 1799\\|microceph/3\\|epa-orchestrator/6",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_38",
+          "pattern": "unable to contact snap store\\|snap install",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_39",
+          "pattern": "Fetch and check assertions for snap \"microceph\"\\|api.snapcraft.io",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_40",
+          "pattern": "cluster bootstrap\\|Timeout, server .* not responding",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_debug_log_openstack-machines.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_41",
+          "pattern": "Completed guarded section fully: 'Bootstrapping'",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_42",
+          "pattern": "cluster bootstrap\\|Timeout, server .* not responding",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_43",
+          "pattern": "Temporary failure in name resolution",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_44",
+          "pattern": "wait timed out after 3599\\|cinder-volume-mysql-router\\|Container service not ready",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_45",
+          "pattern": "Failed to initialize placement client\\|Bad Gateway\\|stopped unexpectedly\\|Starting conductor node",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_46",
+          "pattern": "Completed guarded section fully: 'Bootstrapping'",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_47",
+          "pattern": "snap install openstack\\|unexpected HTTP status code 408\\|api.snapcraft.io/v2/snaps/refresh",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_48",
+          "pattern": "deploy_sunbeam.py\\|install_snap_and_prepare_nodes\\|CalledProcessError",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_49",
+          "pattern": "sunbeam_cluster_list|juju_status|juju_debug",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_50",
+          "pattern": "cannot deploy controller application\\|juju-controller\\|TLS handshake timeout\\|failed to bootstrap model",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_51",
+          "pattern": "deploy_sunbeam.py\\|install_snap_and_prepare_nodes\\|CalledProcessError",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_52",
+          "pattern": "sunbeam_cluster_list|juju_status_openstack|juju_debug_log_openstack",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_53",
+          "pattern": "solqa-shared-maas-server-32\\|solqa-shared-maas-server-35\\|solqa-shared-maas-server-43\\|wait timed out after 1799",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_54",
+          "pattern": "Node joined cluster with roles: storage",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_55",
+          "pattern": "wait timed out after 3599",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_56",
+          "pattern": "ERROR unit.ovn-central.*timed out",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_57",
+          "pattern": "ovn-central",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_58",
+          "pattern": "ovn-central.*Completed guarded section\\|ovn-central.*ERROR",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_59",
+          "pattern": "sunbeam cluster list\\|sunbeam configure -m manifest.yaml",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_60",
+          "pattern": "demo-setup/terraform-apply",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_61",
+          "pattern": "router_interface\\|EOF\\|retries exhausted",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_62",
+          "pattern": "Provider not ready",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_63",
+          "pattern": "cluster resize\\|wait timed out after 3599\\|nova/1\\|Container service not ready",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_64",
+          "pattern": "ECONNREFUSED\\|Failed to initialize placement client\\|stopped unexpectedly\\|Container service not ready",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_65",
+          "pattern": "ledian.maas\\|wait timed out after 1799\\|openstack-hypervisor/3\\|cinder-volume/3\\|microceph/3",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_66",
+          "pattern": "var/log/juju/unit-openstack-hypervisor-3.log$",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_67",
+          "pattern": "ensure_snap_present\\|_is_microovn_present\\|get_snap_information\\|TimeoutError",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_68",
+          "pattern": "var/log/syslog$",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_69",
+          "pattern": "snap.openstack-hypervisor.hook.configure\\|apparmor=\"DENIED\"\\|iptables-legacy\\|cpu_byteorder",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_70",
+          "pattern": "wait timed out after 3599",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_71",
+          "pattern": "traefik-rgw",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_debug_log_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_72",
+          "pattern": "executing \\['find', '/opt/traefik/juju'",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_73",
+          "pattern": "configure-snap.*failed with status",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_74",
+          "pattern": "start-limit-hit\\|repeated too quickly",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_75",
+          "pattern": "wait timed out after 3599",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/kubectl_get_pod.txt",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_76",
+          "pattern": "PodInitializing",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_77",
+          "pattern": "Successfully pulled image",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_78",
+          "pattern": "ERROR: No external connectivity",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_79",
+          "pattern": "wait timed out after 1799",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_80",
+          "pattern": "cluster:3: Reconcile event=<RelationJoinedEvent",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_deploy.grep_81",
+          "pattern": "cluster:3: Reconcile event=<RelationJoinedEvent",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_deploy.md"
+    },
+    "sunbeam_enable_plugins_all": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "vault unseal timeout \u2014 raft follower bootstrap/challenge not completing",
+        "vault update-status hook failure \u2014 vault/0 enters error state during enable",
+        "observability enable juju-wait timeout \u2014 aodh/gnocchi payload containers not ready",
+        "orchestration enable timeout \u2014 heat-api-cfn CrashLoopBackOff from Pebble port bind conflict",
+        "telemetry enable timeout \u2014 openstack-exporter stuck waiting for logging despite healthy telemetry stack",
+        "observability enable false failure \u2014 remote command printed success, then SSH transport/DNS failed",
+        "telemetry enable timeout \u2014 openstack-exporter keeps waiting even after all Loki endpoints are published",
+        "observability enable timeout \u2014 opentelemetry-collector/0 stayed blocked despite healthy relation hooks",
+        "secrets enable timeout \u2014 Barbican bootstraps before the `barbican-api` Pebble socket exists",
+        "orchestration enable false timeout \u2014 Heat pod starts far too late, then self-recovers after the 900s wait expires",
+        "telemetry enable timeout \u2014 partial Loki endpoint publication leaves several apps stuck on `(logging) integration incomplete`",
+        "tls enable false failure \u2014 virtual_maas tunnel dropped during the SSH session",
+        "observability enable false failure \u2014 virtual_maas SSH tunnel dropped mid-command",
+        "secrets enable false failure \u2014 Sunbeam CLI printed success, then aborted on a closed HTTP connection",
+        "telemetry enable timeout \u2014 Juju CMR event delivery failure leaves loki/0 unhookable, breaking the entire Loki URL chain",
+        "ubuntu-pro enable failed due to expired HPE SDR repository GPG key on hardware-observer nodes",
+        "images-sync enable false timeout \u2014 images-sync pod starts far too late, then self-recovers after the 900s wait expires"
+      ],
+      "name": "sunbeam_enable_plugins_all",
+      "primary_artifacts": [
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/pods_openstack_logs.tgz",
+        "generated/sunbeam/juju_debug_log_openstack.txt",
+        "generated/sunbeam/logs-openstack-vault-0.txt",
+        "generated/sunbeam/logs-openstack-vault-1.txt",
+        "generated/sunbeam/logs-openstack-vault-2.txt"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_1",
+          "pattern": "vault",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_2",
+          "pattern": "vault",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/logs-openstack-vault-1.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_4",
+          "pattern": "exit status",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_5",
+          "pattern": "wait timed out\\|CalledProcessError.*vault.*unseal",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_7",
+          "pattern": "Payload container not ready\\|Not all relations are ready",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_enable_plugins_all.grep_9",
+          "pattern": "Enabling observability\\|wait timed out\\|Command failed.*observability",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_enable_plugins_all.md"
+    },
+    "sunbeam_launch_vm": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "VM launched but SSH returns \"No route to host\"",
+        "VM never reached ACTIVE (Nova BUILD timeout)",
+        "Instance create succeeded, but later Nova status poll returned 504 while neutron was flapping",
+        "Runner-side SSH session disconnected, but remote `sunbeam launch` continued and succeeded"
+      ],
+      "name": "sunbeam_launch_vm",
+      "primary_artifacts": [
+        "generated/sunbeam/output.log",
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/show_units_openstack.txt",
+        "generated/sunbeam/kubectl_get_pod.txt",
+        "generated/sunbeam/pods_openstack_logs.tgz",
+        "generated/version_collector_sunbeam_launch_vm.log"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_2",
+          "pattern": "No route to host\\|Connection refused",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_3",
+          "pattern": "ubuntu@",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/juju_status_openstack.txt",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_4",
+          "pattern": "error|blocked|waiting",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_5",
+          "pattern": "test-instance\\|10\\.243\\.",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_6",
+          "pattern": "for",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_7",
+          "pattern": "\"ubuntu@\"",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_8",
+          "pattern": "ubuntu@`",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_launch_vm.grep_9",
+          "pattern": "ubuntu@`",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_launch_vm.md"
+    },
+    "sunbeam_maas_deploy": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "HA Juju controller `wait-for` timeout \u2014 slow KVM deployment",
+        "`sunbeam cluster deploy` false-negative 30-minute timeout after apparent convergence",
+        "`sunbeam cluster deploy` ends with generic `RemoteDisconnected` after Cinder/MySQL ingress wiring stalls",
+        "`sunbeam configure` Terraform apply fails while Neutron backends flap under Traefik",
+        "`sunbeam configure` fails on Terraform state lock despite a healthy deployed cloud",
+        "`sunbeam cluster deploy` times out because storage node curtin late command fails with `ceph-bluestore-tool` permission error",
+        "`sunbeam cluster bootstrap` fails with `aiohttp` 5-minute timeout due to dead connection pool (TCP idle timeout)",
+        "`sunbeam cluster deploy` fails because Juju application deployment gets a Charmhub connection EOF"
+      ],
+      "name": "sunbeam_maas_deploy",
+      "primary_artifacts": [
+        "generated/sunbeam/output.log",
+        "generated/maas/logs-<timestamp>.tgz",
+        "generated/version_collector_sunbeam_maas_deploy.log",
+        "generated/sunbeam/manifest.yaml",
+        "generated/versions.yaml",
+        "var/log/syslog",
+        "var/log/libvirt/qemu/juju-N-serial0.log",
+        "var/log/libvirt/qemu/sunbeam-N-serial0.log",
+        "var/log/libvirt/qemu/juju-N.log"
+      ],
+      "probes": [
+        {
+          "artifact": "var/log/syslog",
+          "category": "step_profile",
+          "id": "sunbeam_maas_deploy.grep_1",
+          "pattern": "juju-\\|sunbeam-",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_maas_deploy.grep_2",
+          "pattern": "cloud-init.*finished\\|Cloud-init.*finished",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_maas_deploy.grep_3",
+          "pattern": "End of file while reading\\|Input/output error",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/output.log",
+          "category": "step_profile",
+          "id": "sunbeam_maas_deploy.grep_4",
+          "pattern": "wait-for\\|timeout\\|returned non-zero",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_maas_deploy.md"
+    },
+    "sunbeam_prepare_env": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "maasserver_routable_pairs does not exist",
+        "testflinger node missing configured OSD device",
+        "bootstrap node snap store timeout during MicroCeph install"
+      ],
+      "name": "sunbeam_prepare_env",
+      "primary_artifacts": [
+        "generated/sunbeam/log.txt",
+        "generated/maas/log.txt",
+        "generated/maas/logs-<timestamp>.tgz",
+        "generated/maas/maas-api",
+        "generated/github-runner/jobs.json",
+        "var/log/syslog",
+        "var/log/maas/var.lib.maas.log",
+        "var/log/haproxy.log",
+        "var/log/postgresql/postgresql-16-main.log",
+        "var/log/postgresql/postgresql-16-ha.log",
+        "var/snap/maas/common/log/dump.dmp",
+        "var/snap/maas/common/log/snap-perms.txt"
+      ],
+      "probes": [
+        {
+          "artifact": "var/log/syslog",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_1",
+          "pattern": "infra\\d+",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "var/log/haproxy.log",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_5",
+          "pattern": "maas-api",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "var/snap/maas/common/log/dump.dmp",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_8",
+          "pattern": "maasserver_routable_pairs",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "var/log/syslog",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_9",
+          "pattern": "auto-refresh\\|post-refresh",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "var/log/syslog",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_10",
+          "pattern": "post-refresh",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/log.txt",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_11",
+          "pattern": "osd_devices",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/log.txt",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_12",
+          "pattern": "Fetch and check assertions\\|408\\|microceph",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/log.txt",
+          "category": "step_profile",
+          "id": "sunbeam_prepare_env.grep_13",
+          "pattern": "Install \"microceph\"",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_prepare_env.md"
+    },
+    "sunbeam_test_plugins": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "k8s/0 Juju Agent Lost due to Model Migration Failure (REAP phase)"
+      ],
+      "name": "sunbeam_test_plugins",
+      "primary_artifacts": [
+        "generated/github-runner/run.log",
+        "generated/sunbeam/sosreport-node1-*.tar.xz",
+        "generated/sunbeam/juju_status_openstack-machines.txt",
+        "generated/sunbeam/juju_debug_log_controller.txt",
+        "var/log/juju/unit-<charm>-<unit_id>.log",
+        "var/log/syslog"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/github-runner/run.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_plugins.grep_1",
+          "pattern": "AssertionError",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/github-runner/run.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_plugins.grep_2",
+          "pattern": "migration failed",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_test_plugins.md"
+    },
+    "sunbeam_test_with_validation_plugin": {
+      "archive_prefixes": [],
+      "known_patterns": [],
+      "name": "sunbeam_test_with_validation_plugin",
+      "primary_artifacts": [
+        "generated/sunbeam/latest_validation.log",
+        "generated/sunbeam/validation_<type>_<timestamp>.log",
+        "generated/sunbeam/output.log",
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/juju_debug_log_openstack.txt",
+        "generated/sunbeam/kubectl_get_pod.txt"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_1",
+          "pattern": "FAILED|Ran:|Failed:",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_2",
+          "pattern": "Ran:|Passed:|Failed:|Skipped:",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_3",
+          "pattern": "FAILED",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_4",
+          "pattern": "<TestClassName>.*FAILED",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_5",
+          "pattern": "timeout\\|reachable\\|ping\\|ssh",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/latest_validation.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin.grep_6",
+          "pattern": "enable\\|plugin\\|feature",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_test_with_validation_plugin.md"
+    },
+    "sunbeam_test_with_validation_plugin_no_features": {
+      "archive_prefixes": [],
+      "known_patterns": [
+        "Floating IP / VM Public Network Unreachable",
+        "Cilium `br+` Device Pattern Intercepts OVN `br-ex` (Beta Channel Regression)",
+        "Cilium `cil_from_netdev` on physnet1 NIC after Policy Update (edge/cilium Channel)",
+        "`virtual_maas` SSH Tunnel Drops During Validation (False Refstack Failure)"
+      ],
+      "name": "sunbeam_test_with_validation_plugin_no_features",
+      "primary_artifacts": [
+        "generated/sunbeam/validation_smoke_<timestamp>.log",
+        "generated/sunbeam/validation_quick_<timestamp>.log",
+        "generated/sunbeam/latest_validation.log",
+        "generated/sunbeam/output.log",
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/juju_debug_log_openstack.txt",
+        "generated/sunbeam/kubectl_get_pod.txt",
+        "generated/sunbeam/pods_kube-system_logs.tgz",
+        "generated/sunbeam/pods_openstack_logs.tgz",
+        "generated/sunbeam/pods_metallb-system_logs.tgz",
+        "generated/sunbeam/pods_controller-sunbeam-controller_logs.tgz"
+      ],
+      "probes": [
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_1",
+          "pattern": "FAILED|Ran:|Failed:",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_2",
+          "pattern": "Ran:|Passed:|Failed:|Skipped:",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_3",
+          "pattern": "FAILED",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_4",
+          "pattern": "<TestClassName>.*FAILED",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_5",
+          "pattern": "timeout\\|reachable\\|ping\\|ssh",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_6",
+          "pattern": "SSL_accept\\|SSL_ERROR_ZERO_RETURN",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_7",
+          "pattern": "Cannot find Logical_Router_Port",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_8",
+          "pattern": "SSL_accept",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_9",
+          "pattern": "devices=",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_10",
+          "pattern": "Devices changed\\|br-ex",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_11",
+          "pattern": "attached to device br-ex",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_12",
+          "pattern": "devices`",
+          "read_class": "targeted_search"
+        },
+        {
+          "artifact": "generated/sunbeam/validation_smoke_<timestamp>.log",
+          "category": "step_profile",
+          "id": "sunbeam_test_with_validation_plugin_no_features.grep_13",
+          "pattern": "devices=",
+          "read_class": "targeted_search"
+        }
+      ],
+      "source_path": "sunbeam_test_with_validation_plugin_no_features.md"
+    }
+  }
+}

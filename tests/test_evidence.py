@@ -17,6 +17,8 @@ def test_evidence_collector_identifies_first_failed_non_cleanup_step():
     assert any("wait timed out" in item.excerpt for item in pack.evidence)
     assert all("Failed to collect files" not in item.excerpt for item in pack.evidence)
     assert any(item.kind == "juju-status" for item in pack.evidence)
+    assert pack.step_selection.selected.name == "sunbeam_deploy"
+    assert pack.step_selection.confidence == "high"
 
 
 def test_evidence_pack_prompt_is_bounded_and_contains_file_references():
@@ -111,6 +113,66 @@ def test_evidence_collector_keeps_generic_steps_generic_without_sunbeam_artifact
 
     assert pack.failed_step.family == "generic"
     assert {item.kind for item in pack.evidence} == {"github-runner"}
+
+
+def test_evidence_collector_records_rejected_cleanup_failures(tmp_path):
+    jobs = {
+        "jobs": [
+            {
+                "run_id": 202,
+                "workflow_name": "workflow",
+                "head_branch": "main",
+                "name": "Run the pipeline",
+                "steps": [
+                    {"name": "sunbeam_deploy", "conclusion": "failure", "number": 1},
+                    {"name": "Report the job to weebl", "conclusion": "failure", "number": 2},
+                ],
+            }
+        ]
+    }
+    path = tmp_path / "generated/github-runner/jobs.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(jobs), encoding="utf-8")
+    (tmp_path / "generated/sunbeam").mkdir(parents=True)
+    (tmp_path / "generated/sunbeam/output.log").write_text(
+        "wait timed out\n",
+        encoding="utf-8",
+    )
+
+    pack = EvidenceCollector(tmp_path, "uuid").collect()
+
+    assert pack.failed_step.name == "sunbeam_deploy"
+    assert [step.name for step in pack.step_selection.rejected_cleanup] == [
+        "Report the job to weebl"
+    ]
+
+
+def test_evidence_collector_uses_cleanup_only_failure_with_low_confidence(tmp_path):
+    jobs = {
+        "jobs": [
+            {
+                "run_id": 202,
+                "workflow_name": "workflow",
+                "head_branch": "main",
+                "name": "Run the pipeline",
+                "steps": [
+                    {"name": "Collect logs", "conclusion": "failure", "number": 1},
+                ],
+            }
+        ]
+    }
+    path = tmp_path / "generated/github-runner/jobs.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(jobs), encoding="utf-8")
+    (tmp_path / "generated/github-runner/run.log").write_text(
+        "Process completed with exit code 1\n",
+        encoding="utf-8",
+    )
+
+    pack = EvidenceCollector(tmp_path, "uuid").collect()
+
+    assert pack.failed_step.name == "Collect logs"
+    assert pack.step_selection.confidence == "low"
 
 
 def test_status_summary_omits_benign_headers_but_keeps_status_signal(tmp_path):

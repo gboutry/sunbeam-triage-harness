@@ -894,8 +894,12 @@ def test_openrouter_client_retries_supported_no_tool_diagnosis_until_evidence_to
             tool_calls=[
                 FakeToolCall(
                     "call-1",
-                    "search_artifacts",
-                    json.dumps({"pattern": "Unexpected status code 502"}),
+                    "get_artifact_file",
+                    json.dumps({
+                        "path": "generated/sunbeam/validation_refstack.log",
+                        "line_start": 1,
+                        "line_count": 5,
+                    }),
                 )
             ],
         ),
@@ -914,6 +918,39 @@ def test_openrouter_client_retries_supported_no_tool_diagnosis_until_evidence_to
     retry_message = sdk.chat.calls[1]["messages"][-1]["content"]
     assert "supported or confirmed diagnosis" in retry_message
     assert "evidence-producing artifact tool" in retry_message
+
+
+def test_openrouter_client_rejects_broad_search_only_confirmed_diagnosis(tmp_path):
+    response = {
+        "summary": "Refstack failed.",
+        "failure_surface": "refstack exited 1.",
+        "confidence": "confirmed",
+        "root_cause": "Keystone returned HTTP 502 during Tempest auth.",
+        "needs_more_evidence": False,
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_artifacts",
+                    json.dumps({"pattern": "Unexpected status code 502"}),
+                )
+            ],
+        ),
+        FakeSdkResponse(json.dumps(response)),
+    ])
+
+    with pytest.raises(RuntimeError, match="targeted artifact read"):
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+            "evidence text",
+            artifact_root=tmp_path,
+        )
 
 
 def test_openrouter_client_rejects_supported_diagnosis_when_required_tools_are_ignored(

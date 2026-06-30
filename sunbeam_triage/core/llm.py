@@ -20,6 +20,7 @@ from .llm_policy import (
     exchange_range_has_evidence_tool_calls,
     exchange_range_has_tool_budget_fallback,
     exchange_range_has_tool_calls,
+    exchange_range_has_targeted_read_tool_calls,
 )
 from .llm_prompts import (
     chat_system_prompt,
@@ -156,6 +157,19 @@ class OpenRouterClient:
                 "Model returned a supported or confirmed diagnosis without "
                 "using an evidence-producing artifact tool; diagnosis was not "
                 "validated."
+            )
+        if (
+            not has_tool_budget_fallback
+            and artifact_root is not None
+            and data.get("confidence") == "confirmed"
+            and not exchange_range_has_targeted_read_tool_calls(
+                self.exchanges,
+                exchange_start,
+            )
+        ):
+            raise RuntimeError(
+                "Model returned a confirmed diagnosis without using a targeted "
+                "artifact read; diagnosis was not validated."
             )
         return DiagnosisReport.from_dict(data)
 

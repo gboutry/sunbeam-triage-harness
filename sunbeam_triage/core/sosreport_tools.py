@@ -30,7 +30,7 @@ def list_sosreports(root: Path) -> dict[str, Any]:
 
 
 def list_sosreport_files(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
-    archive_ref = _archive_ref(root, arguments)
+    archive_ref = _archive_ref(root, arguments, sosreport_only=True)
     if not archive_ref["ok"]:
         return archive_ref
 
@@ -55,7 +55,7 @@ def list_sosreport_files(root: Path, arguments: dict[str, Any]) -> dict[str, Any
 
 
 def search_sosreport(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
-    archive_ref = _archive_ref(root, arguments)
+    archive_ref = _archive_ref(root, arguments, sosreport_only=True)
     if not archive_ref["ok"]:
         return archive_ref
 
@@ -108,7 +108,7 @@ def search_sosreport(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_sosreport_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
-    archive_ref = _archive_ref(root, arguments)
+    archive_ref = _archive_ref(root, arguments, sosreport_only=True)
     if not archive_ref["ok"]:
         return archive_ref
 
@@ -176,22 +176,210 @@ def get_sosreport_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _archive_ref(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
+def list_archive_files(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
+    return _list_archive_members(root, arguments, sosreport_only=False)
+
+
+def search_archive(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
+    return _search_archive_members(root, arguments, sosreport_only=False)
+
+
+def get_archive_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
+    archive_args = dict(arguments)
+    if "member_path" in archive_args:
+        archive_args["member_path"] = str(archive_args["member_path"])
+    return _get_archive_member(root, archive_args, sosreport_only=False)
+
+
+def _list_archive_members(
+    root: Path,
+    arguments: dict[str, Any],
+    *,
+    sosreport_only: bool,
+) -> dict[str, Any]:
+    archive_ref = _archive_ref(root, arguments, sosreport_only=sosreport_only)
+    if not archive_ref["ok"]:
+        return archive_ref
+
+    prefix = str(arguments.get("prefix", ""))
+    limit = _coerce_limit(arguments.get("limit"), DEFAULT_LIST_LIMIT)
+    files = []
+    with tarfile.open(archive_ref["path"], "r:*") as archive:
+        for member in archive.getmembers():
+            normalized = _normalized_member_path(member.name)
+            if normalized is None or not member.isfile():
+                continue
+            if prefix and not normalized.startswith(prefix):
+                continue
+            files.append({"path": normalized, "size_bytes": member.size})
+    files = sorted(files, key=itemgetter("path"))
+    return {
+        "ok": True,
+        "archive_path": archive_ref["relative"],
+        "files": files[:limit],
+        "truncated": len(files) > limit,
+    }
+
+
+def _search_archive_members(
+    root: Path,
+    arguments: dict[str, Any],
+    *,
+    sosreport_only: bool,
+) -> dict[str, Any]:
+    archive_ref = _archive_ref(root, arguments, sosreport_only=sosreport_only)
+    if not archive_ref["ok"]:
+        return archive_ref
+
+    raw_pattern = str(arguments.get("pattern", ""))
+    if not raw_pattern:
+        return {"ok": False, "error": "Search pattern is required."}
+    try:
+        pattern = re.compile(raw_pattern, re.IGNORECASE)
+    except re.error as exc:
+        return {"ok": False, "error": f"Invalid search pattern: {exc}"}
+
+    prefix = str(arguments.get("prefix", ""))
+    limit = _coerce_limit(arguments.get("limit"), DEFAULT_SEARCH_LIMIT)
+    matches = []
+    truncated = False
+    with tarfile.open(archive_ref["path"], "r:*") as archive:
+        for member in archive.getmembers():
+            normalized = _normalized_member_path(member.name)
+            if normalized is None or not member.isfile():
+                continue
+            if prefix and not normalized.startswith(prefix):
+                continue
+            if member.size > SEARCH_MEMBER_MAX_BYTES:
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            data = extracted.read(SEARCH_MEMBER_MAX_BYTES + 1)
+            if _is_binary(data):
+                continue
+            text = data[:SEARCH_MEMBER_MAX_BYTES].decode("utf-8", errors="replace")
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if pattern.search(line):
+                    if len(matches) >= limit:
+                        truncated = True
+                        break
+                    matches.append({
+                        "path": normalized,
+                        "line": line_number,
+                        "excerpt": redact_text(line.strip()),
+                    })
+            if truncated:
+                break
+    return {
+        "ok": True,
+        "archive_path": archive_ref["relative"],
+        "matches": matches,
+        "truncated": truncated,
+    }
+
+
+def _get_archive_member(
+    root: Path,
+    arguments: dict[str, Any],
+    *,
+    sosreport_only: bool,
+) -> dict[str, Any]:
+    archive_ref = _archive_ref(root, arguments, sosreport_only=sosreport_only)
+    if not archive_ref["ok"]:
+        return archive_ref
+
+    requested = str(arguments.get("member_path", ""))
+    requested_path = PurePosixPath(requested)
+    if _is_unsafe_member_path(requested_path):
+        return {
+            "ok": False,
+            "error": "Archive member path must be a safe relative path.",
+        }
+
+    max_bytes = _coerce_max_bytes(arguments.get("max_bytes"))
+    line_start = _optional_positive_int(arguments.get("line_start"))
+    line_count = _optional_positive_int(arguments.get("line_count"))
+
+    with tarfile.open(archive_ref["path"], "r:*") as archive:
+        member = _find_member(archive, requested)
+        if member is None:
+            return {
+                "ok": False,
+                "archive_path": archive_ref["relative"],
+                "path": requested,
+                "error": "Archive member does not exist.",
+            }
+        extracted = archive.extractfile(member)
+        if extracted is None:
+            return {
+                "ok": False,
+                "archive_path": archive_ref["relative"],
+                "path": requested,
+                "error": "Archive member is not readable.",
+            }
+        data = extracted.read(max_bytes + 1)
+
+    if _is_binary(data):
+        return {
+            "ok": False,
+            "archive_path": archive_ref["relative"],
+            "path": requested,
+            "size_bytes": member.size,
+            "error": "Binary archive member preview is not available.",
+            "binary": True,
+        }
+
+    truncated = len(data) > max_bytes
+    text = data[:max_bytes].decode("utf-8", errors="replace")
+    if line_start is not None:
+        lines = text.splitlines()
+        count = line_count if line_count is not None else len(lines)
+        text = "\n".join(lines[line_start - 1 : line_start - 1 + count])
+    result = {
+        "ok": True,
+        "archive_path": archive_ref["relative"],
+        "path": requested,
+        "size_bytes": member.size,
+        "content": redact_text(text),
+        "truncated": truncated,
+        "binary": False,
+    }
+    if line_start is not None:
+        result["line_start"] = line_start
+        result["line_count"] = (
+            line_count if line_count is not None else len(text.splitlines())
+        )
+    return result
+
+
+def _archive_ref(
+    root: Path,
+    arguments: dict[str, Any],
+    *,
+    sosreport_only: bool,
+) -> dict[str, Any]:
     requested = str(arguments.get("archive_path", ""))
     relative = Path(requested)
     if relative.is_absolute() or not relative.parts or ".." in relative.parts:
         return {
             "ok": False,
-            "error": "Sosreport archive path must be a safe relative path.",
+            "error": "Archive path must be a safe relative path.",
         }
     path = Path(root) / relative
     if not path.exists() or not path.is_file():
         return {
             "ok": False,
             "archive_path": relative.as_posix(),
-            "error": "Sosreport archive does not exist.",
+            "error": "Archive does not exist.",
         }
-    if not path.name.startswith("sosreport-") or ".tar" not in path.name:
+    if not path.name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz")):
+        return {
+            "ok": False,
+            "archive_path": relative.as_posix(),
+            "error": "Path is not a tar archive.",
+        }
+    if sosreport_only and not path.name.startswith("sosreport-"):
         return {
             "ok": False,
             "archive_path": relative.as_posix(),

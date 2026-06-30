@@ -15,6 +15,9 @@ def test_artifact_tool_definitions_warn_that_file_reads_are_costly():
         "list_artifact_files",
         "get_artifact_file",
         "search_artifacts",
+        "list_archive_files",
+        "search_archive",
+        "get_archive_file",
         "list_sosreports",
         "list_sosreport_files",
         "search_sosreport",
@@ -444,9 +447,86 @@ def test_search_sosreport_skips_binary_members(tmp_path):
     ]
 
 
+def test_generic_archive_tools_search_and_read_non_sosreport_tgz(tmp_path):
+    root = tmp_path / "uuid"
+    archive = root / "generated/sunbeam/pods_openstack_logs.tgz"
+    _write_gzip_tar(
+        archive,
+        {
+            "generated/sunbeam/logs-openstack-neutron-0.txt": (
+                "ok\nERROR Cannot find Logical_Router_Port\n"
+            ),
+        },
+    )
+
+    listing = execute_artifact_tool(
+        root,
+        "list_archive_files",
+        {
+            "archive_path": "generated/sunbeam/pods_openstack_logs.tgz",
+            "prefix": "generated/sunbeam/",
+        },
+    )
+    search = execute_artifact_tool(
+        root,
+        "search_archive",
+        {
+            "archive_path": "generated/sunbeam/pods_openstack_logs.tgz",
+            "pattern": "Logical_Router_Port",
+            "prefix": "generated/sunbeam/",
+        },
+    )
+    read = execute_artifact_tool(
+        root,
+        "get_archive_file",
+        {
+            "archive_path": "generated/sunbeam/pods_openstack_logs.tgz",
+            "member_path": "generated/sunbeam/logs-openstack-neutron-0.txt",
+            "line_start": 2,
+            "line_count": 1,
+        },
+    )
+
+    assert listing["files"] == [
+        {
+            "path": "generated/sunbeam/logs-openstack-neutron-0.txt",
+            "size_bytes": 41,
+        }
+    ]
+    assert search["matches"] == [
+        {
+            "path": "generated/sunbeam/logs-openstack-neutron-0.txt",
+            "line": 2,
+            "excerpt": "ERROR Cannot find Logical_Router_Port",
+        }
+    ]
+    assert read["content"] == "ERROR Cannot find Logical_Router_Port"
+
+
+def test_generic_archive_tools_reject_unsafe_archive_path(tmp_path):
+    result = execute_artifact_tool(
+        tmp_path / "uuid",
+        "list_archive_files",
+        {"archive_path": "../pods_openstack_logs.tgz"},
+    )
+
+    assert result["ok"] is False
+    assert "safe relative" in result["error"]
+
+
 def _write_sosreport(path: Path, members: dict[str, str | bytes]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(path, "w:xz") as archive:
+        for name, content in members.items():
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+
+def _write_gzip_tar(path: Path, members: dict[str, str | bytes]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w:gz") as archive:
         for name, content in members.items():
             data = content if isinstance(content, bytes) else content.encode("utf-8")
             info = tarfile.TarInfo(name)

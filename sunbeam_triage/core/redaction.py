@@ -92,7 +92,10 @@ def _redact_sunbeam_enable_pro(match: re.Match[str]) -> str:
 
 def _redact_url_credentials(match: re.Match[str]) -> str:
     value = match.group(0)
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
     if not parsed.username and not parsed.password:
         return value
     host = parsed.hostname or ""

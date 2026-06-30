@@ -66,3 +66,11 @@ def test_redact_text_masks_sunbeam_enable_pro_cli_tokens():
     assert "sunbeam enable pro <redacted>" in redacted
     assert "sunbeam enable pro --token <redacted> --attach" in redacted
     assert "sunbeam enable pro --contract-id contract <redacted>" in redacted
+
+
+def test_redact_text_ignores_malformed_url_like_log_lines():
+    text = "2026-06-23T09:37:00Z \x1b[36;1mproxy= http://squid.internal:3128\x1b[0m"
+
+    redacted = redact_text(text)
+
+    assert "http://squid.internal:3128" in redacted

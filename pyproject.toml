@@ -32,6 +32,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["sunbeam_triage*"]
 
+[tool.setuptools.package-data]
+sunbeam_triage = ["data/*.json"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 88

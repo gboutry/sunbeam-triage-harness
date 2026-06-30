@@ -38,6 +38,7 @@ class ToolObservation:
     truncated: bool = False
     error: str = ""
     missing_evidence: tuple[str, ...] = ()
+    confidence: str = "low"
 
 
 @dataclass
@@ -186,7 +187,12 @@ def observe_tool_result(
         truncated=bool(result.get("tool_result_truncated_by_budget")),
         error=str(result.get("error", "")),
         missing_evidence=tuple(_missing_evidence(tool_name, arguments, result)),
+        confidence=_confidence_for_tool_result(tool_name, arguments, result),
     )
+
+
+def tool_observation_confidence(observation: ToolObservation) -> str:
+    return observation.confidence
 
 
 def _evidence_keys(
@@ -267,6 +273,24 @@ def _result_is_non_evidence(result: dict[str, Any]) -> bool:
         or result.get("round_tool_limit_reached")
         or result.get("ok") is False
     )
+
+
+def _confidence_for_tool_result(
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    if _result_is_non_evidence(result):
+        return "low"
+    if tool_name in {"get_artifact_file", "get_sosreport_file", "get_archive_file"}:
+        return "high" if arguments.get("line_start") else "medium"
+    if tool_name in {"search_sosreport", "search_archive"}:
+        return "medium"
+    if tool_name == "search_artifacts":
+        if arguments.get("path_prefix") or arguments.get("path_glob"):
+            return "medium"
+        return "low"
+    return "low"
 
 
 def _pack_evidence(path: str, line: Any, excerpt: str) -> str:

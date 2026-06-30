@@ -7,6 +7,7 @@ from sunbeam_triage.core.triage_state import (
     observe_tool_result,
     parse_budget_name,
     resolve_triage_budget,
+    tool_observation_confidence,
 )
 
 
@@ -183,3 +184,37 @@ def test_truncated_result_counts_as_missing_evidence_and_non_progress():
     assert state.missing_evidence
     assert state.should_finalize() is True
     assert state.stop_reason == "stalled"
+
+
+def test_tool_observation_confidence_separates_broad_and_targeted_reads():
+    broad = observe_tool_result(
+        "search_artifacts",
+        {"pattern": "wait timed out"},
+        json.dumps({
+            "ok": True,
+            "matches": [
+                {
+                    "path": "generated/sunbeam/output.log",
+                    "line": 1,
+                    "excerpt": "wait timed out",
+                }
+            ],
+        }),
+    )
+    targeted = observe_tool_result(
+        "get_artifact_file",
+        {
+            "path": "generated/sunbeam/output.log",
+            "line_start": 10,
+            "line_count": 20,
+        },
+        json.dumps({
+            "ok": True,
+            "path": "generated/sunbeam/output.log",
+            "line_start": 10,
+            "content": "wait timed out\n",
+        }),
+    )
+
+    assert tool_observation_confidence(broad) == "low"
+    assert tool_observation_confidence(targeted) == "high"
