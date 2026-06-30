@@ -1,5 +1,6 @@
 __pycache__/
 .pytest_cache/
+sunbeam_triage.egg-info/
 *.pyc
 artifacts/
 diagnostics-*.html
