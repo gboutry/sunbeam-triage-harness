@@ -4,6 +4,9 @@ repos:
     hooks:
       - id: ruff-check
         args: [--fix]
+      - id: ruff-check
+        name: ruff import order
+        args: [--select=I]
       - id: ruff-format
   - repo: https://github.com/astral-sh/ty-pre-commit
     rev: v0.0.55
