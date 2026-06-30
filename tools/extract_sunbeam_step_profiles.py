@@ -4,7 +4,10 @@ import argparse
 import json
 from pathlib import Path
 
-from sunbeam_triage.core.step_profile_extractor import extract_profiles, profiles_to_dict
+from sunbeam_triage.core.step_profile_extractor import (
+    extract_profiles,
+    profiles_to_dict,
+)
 
 
 def main() -> None:

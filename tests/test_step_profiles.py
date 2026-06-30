@@ -34,7 +34,49 @@ def test_committed_sunbeam_step_profiles_cover_requested_steps():
         probe.pattern == "migration failed"
         for probe in STEP_PROFILES["sunbeam_test_plugins"].probes
     )
-    assert sum(len(profile.probes) for profile in STEP_PROFILES.values()) >= 100
+    assert sum(len(profile.probes) for profile in STEP_PROFILES.values()) >= 80
+
+
+def test_committed_sunbeam_step_profiles_drop_high_risk_static_probes():
+    risky_patterns = {
+        "15:24:5",
+        "08:52:22\\|08:52:56",
+        "<configure-start-minute>",
+        "<TestClassName>.*FAILED",
+        "for",
+    }
+    case_hosts = ("chespin", "behaim", "anonster", "crustle", "ledian.maas")
+    patterns = {
+        probe.pattern
+        for profile in STEP_PROFILES.values()
+        for probe in profile.probes
+    }
+
+    assert patterns.isdisjoint(risky_patterns)
+    assert not any(
+        host in pattern for host in case_hosts for pattern in patterns
+    )
+
+
+def test_committed_sunbeam_step_profiles_classify_navigation_and_targeted_reads():
+    vault_probes = [
+        probe
+        for probe in STEP_PROFILES["sunbeam_enable_plugins_all"].probes
+        if probe.pattern == "vault"
+    ]
+    assert vault_probes
+    assert all(probe.category == "navigation" for probe in vault_probes)
+    assert all(probe.read_class == "broad_search" for probe in vault_probes)
+
+    deploy_profile = STEP_PROFILES["sunbeam_deploy"]
+    assert any(
+        probe.pattern == "cluster:3: Reconcile event=<RelationJoinedEvent"
+        for probe in deploy_profile.probes
+    )
+    assert any(
+        read.selector == "var/log/syslog$"
+        for read in deploy_profile.targeted_reads
+    )
 
 
 def test_extract_profiles_from_markdown_tables_and_grep_blocks(tmp_path):
@@ -51,7 +93,7 @@ def test_extract_profiles_from_markdown_tables_and_grep_blocks(tmp_path):
             "",
             "## Grep Patterns",
             "```bash",
-            "grep -E \"ERROR|FAILED\" generated/sunbeam/output.log",
+            'grep -E "ERROR|FAILED" generated/sunbeam/output.log',
             "```",
             "",
             "## Known Failure Patterns",
@@ -67,11 +109,15 @@ def test_extract_profiles_from_markdown_tables_and_grep_blocks(tmp_path):
     profile = profiles["sunbeam_custom"]
     assert profile.primary_artifacts == ("generated/sunbeam/output.log",)
     assert profile.probes[0].pattern == "ERROR|FAILED"
+    assert profile.probes[0].source_line == 10
+    assert profile.probes[0].source_text == (
+        'grep -E "ERROR|FAILED" generated/sunbeam/output.log'
+    )
     assert profile.known_patterns == ("sample failure",)
     assert profile.source_path == "sunbeam_custom.md"
 
 
-def test_extract_profiles_handles_grep_options_with_arguments(tmp_path):
+def test_extract_profiles_handles_grep_options_with_arguments_and_prose(tmp_path):
     steps = tmp_path / "steps"
     steps.mkdir()
     (steps / "sunbeam_custom.md").write_text(
@@ -80,8 +126,11 @@ def test_extract_profiles_handles_grep_options_with_arguments(tmp_path):
             "|---|---|---|",
             "| `generated/github-runner/run.log` | primary | Always |",
             "",
-            "grep -n -C 5 \"AssertionError\" generated/github-runner/run.log",
-            "grep -A 40 \"<TestClassName>.*FAILED\" validation.log",
+            "STDOUT is `b''` (grep for `ubuntu@` never matched)",
+            "```bash",
+            'grep -n -C 5 "AssertionError" generated/github-runner/run.log',
+            'grep -A 40 "real.*FAILED" validation.log',
+            "```",
         ]),
         encoding="utf-8",
     )
@@ -90,5 +139,37 @@ def test_extract_profiles_handles_grep_options_with_arguments(tmp_path):
 
     assert [probe.pattern for probe in profile.probes] == [
         "AssertionError",
-        "<TestClassName>.*FAILED",
+        "real.*FAILED",
     ]
+
+
+def test_extract_profiles_sanitizes_risky_probes_and_guidance(tmp_path):
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    (steps / "sunbeam_custom.md").write_text(
+        "\n".join([
+            "| Path | Description | When to check |",
+            "|---|---|---|",
+            "| `generated/sunbeam/output.log` | primary | Always |",
+            "```bash",
+            'grep "15:24:5" generated/sunbeam/output.log',
+            'grep "<TestClassName>.*FAILED" generated/sunbeam/output.log',
+            'grep "ledian.maas\\|wait timed out after 1799\\|openstack-hypervisor/3\\|cinder-volume/3\\|microceph/3" generated/sunbeam/output.log',
+            'grep "cluster:3: Reconcile event=<RelationJoinedEvent" generated/sunbeam/output.log',
+            'grep "vault" generated/sunbeam/output.log',
+            'tar -xJOf sosreport.tar.xz "*/var/log/syslog" | grep -n "var/log/syslog$"',
+            "```",
+        ]),
+        encoding="utf-8",
+    )
+
+    profile = extract_profiles(Path(steps))["sunbeam_custom"]
+
+    assert [probe.pattern for probe in profile.probes] == [
+        "wait timed out after 1799\\|openstack-hypervisor/\\d+\\|cinder-volume/\\d+\\|microceph/\\d+",
+        "cluster:3: Reconcile event=<RelationJoinedEvent",
+        "vault",
+    ]
+    assert profile.probes[-1].category == "navigation"
+    assert profile.probes[-1].read_class == "broad_search"
+    assert profile.targeted_reads[0].selector == "var/log/syslog$"

@@ -107,10 +107,14 @@ class EvidencePack:
                     f"confidence={self.step_selection.confidence}"
                 ),
             ])
-            for step in self.step_selection.rejected_cleanup:
-                parts.append(f"- rejected_cleanup={step.name}")
-            for step in self.step_selection.rejected_post:
-                parts.append(f"- rejected_post={step.name}")
+            parts.extend(
+                f"- rejected_cleanup={step.name}"
+                for step in self.step_selection.rejected_cleanup
+            )
+            parts.extend(
+                f"- rejected_post={step.name}"
+                for step in self.step_selection.rejected_post
+            )
         probe_lines = _probe_prompt_lines(self.probe_results)
         if probe_lines:
             parts.extend(["", "Deterministic Probes:", *probe_lines])

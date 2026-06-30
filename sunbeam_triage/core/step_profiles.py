@@ -13,6 +13,19 @@ class ProbeSpec:
     pattern: str
     category: str = "step_profile"
     read_class: str = "targeted_search"
+    source_line: int | None = None
+    source_text: str = ""
+
+
+@dataclass(frozen=True)
+class TargetedReadSpec:
+    id: str
+    artifact: str
+    selector: str
+    reason: str
+    source_line: int | None = None
+    source_text: str = ""
+    read_class: str = "targeted_read"
 
 
 @dataclass(frozen=True)
@@ -20,6 +33,7 @@ class StepProfile:
     name: str
     primary_artifacts: tuple[str, ...] = ()
     probes: tuple[ProbeSpec, ...] = ()
+    targeted_reads: tuple[TargetedReadSpec, ...] = ()
     known_patterns: tuple[str, ...] = ()
     archive_prefixes: tuple[str, ...] = ()
     source_path: str = ""
@@ -50,6 +64,10 @@ def _profile_from_dict(data: dict[str, Any]) -> StepProfile:
         name=data["name"],
         primary_artifacts=tuple(data.get("primary_artifacts", ())),
         probes=tuple(_probe_from_dict(probe) for probe in data.get("probes", ())),
+        targeted_reads=tuple(
+            _targeted_read_from_dict(read)
+            for read in data.get("targeted_reads", ())
+        ),
         known_patterns=tuple(data.get("known_patterns", ())),
         archive_prefixes=tuple(data.get("archive_prefixes", ())),
         source_path=data.get("source_path", ""),
@@ -63,6 +81,20 @@ def _probe_from_dict(data: dict[str, Any]) -> ProbeSpec:
         pattern=data["pattern"],
         category=data.get("category", "step_profile"),
         read_class=data.get("read_class", "targeted_search"),
+        source_line=data.get("source_line"),
+        source_text=data.get("source_text", ""),
+    )
+
+
+def _targeted_read_from_dict(data: dict[str, Any]) -> TargetedReadSpec:
+    return TargetedReadSpec(
+        id=data["id"],
+        artifact=data["artifact"],
+        selector=data["selector"],
+        reason=data["reason"],
+        source_line=data.get("source_line"),
+        source_text=data.get("source_text", ""),
+        read_class=data.get("read_class", "targeted_read"),
     )
 
 
