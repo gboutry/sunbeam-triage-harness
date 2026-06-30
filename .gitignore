@@ -4,3 +4,4 @@ sunbeam_triage.egg-info/
 *.pyc
 artifacts/
 diagnostics-*.html
+.worktrees
