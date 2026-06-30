@@ -7,6 +7,8 @@ def test_pyproject_declares_package_script_and_dependencies():
 
     assert data["project"]["name"] == "sunbeam-triage"
     assert data["project"]["scripts"]["sunbeam-triage"] == "sunbeam_triage.cli:main"
+    assert data["project"]["scripts"]["sunbeam-triage-cli"] == "sunbeam_triage.cli:main"
+    assert data["project"]["scripts"]["sunbeam-triage-ui"] == "sunbeam_triage.ui:main"
     assert (
         data["project"]["scripts"]["sunbeam-triage-analyze-rounds"]
         == "sunbeam_triage.analyze_rounds:main"
@@ -17,3 +19,4 @@ def test_pyproject_declares_package_script_and_dependencies():
     assert data["tool"]["setuptools"]["packages"]["find"]["include"] == [
         "sunbeam_triage*"
     ]
+    assert "streamlit_app" in data["tool"]["setuptools"]["py-modules"]
