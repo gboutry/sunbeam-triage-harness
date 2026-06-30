@@ -487,13 +487,31 @@ def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> No
         return
 
     st.caption(f"{session['uuid']} · {session['model']}")
-    st.subheader(session.get("summary", "Diagnosis"))
+    st.subheader(session.get("failed_step") or "Diagnosis result")
+    metadata = _result_metadata(session)
+    if metadata:
+        st.caption(" · ".join(metadata))
+    st.markdown("**Primary finding**")
+    st.write(_primary_finding(session))
+
+    timeline_rows = _failure_timeline_rows(session)
+    if timeline_rows:
+        st.markdown("**Failure timeline**")
+        st.dataframe(timeline_rows, width="stretch", hide_index=True)
+
     cols = st.columns(3)
     cols[0].metric("Confidence", session.get("confidence", ""))
     cols[1].metric("Failed step", session.get("failed_step", ""))
     cols[2].metric("Chat turns", len(session.get("chat", [])) // 2)
 
-    with st.expander("Diagnosis details", expanded=True):
+    candidate_rows = _candidate_mechanism_rows(session)
+    st.markdown("**Candidate mechanisms**")
+    if candidate_rows:
+        st.dataframe(candidate_rows, width="stretch", hide_index=True)
+    else:
+        st.caption("No candidate mechanisms recorded.")
+
+    with st.expander("Diagnosis details", expanded=False):
         _render_download_failures(session)
         st.markdown("**Failure Surface**")
         st.write(session.get("failure_surface", ""))
@@ -591,6 +609,67 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         st.json(session.get("exchanges", []), expanded=False)
     with tabs[6]:
         _render_arena_tab(config)
+
+
+def _primary_finding(session: dict[str, Any]) -> str:
+    root_cause = str(session.get("root_cause", "")).strip()
+    if root_cause:
+        return root_cause
+    summary = str(session.get("summary", "")).strip()
+    return summary or "No diagnosis summary recorded."
+
+
+def _result_metadata(session: dict[str, Any]) -> list[str]:
+    metadata = []
+    triage_confidence = str(session.get("triage_confidence", "")).strip()
+    stop_reason = str(session.get("stop_reason", "")).strip()
+    if triage_confidence and triage_confidence != "unknown":
+        metadata.append(f"triage confidence: {triage_confidence}")
+    if stop_reason:
+        metadata.append(f"stop reason: {stop_reason}")
+    if session.get("needs_more_evidence"):
+        metadata.append("needs more evidence")
+    return metadata
+
+
+def _failure_timeline_rows(
+    session: dict[str, Any],
+    *,
+    limit: int = 5,
+) -> list[dict[str, str]]:
+    rows = []
+    for item in session.get("failure_timeline", [])[:limit]:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source", "")).strip()
+        location = str(item.get("location", "")).strip()
+        if source and location:
+            source = f"{source}: {location}"
+        else:
+            source = source or location
+        rows.append(
+            {
+                "time": str(item.get("timestamp", "")).strip(),
+                "source": source,
+                "event": str(item.get("event", "")).strip(),
+            }
+        )
+    return rows
+
+
+def _candidate_mechanism_rows(session: dict[str, Any]) -> list[dict[str, str]]:
+    rows = []
+    for item in session.get("candidate_mechanisms", []):
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "mechanism": str(item.get("name", "")).strip(),
+                "status": str(item.get("status", "")).strip(),
+                "rationale": str(item.get("rationale", "")).strip(),
+            }
+        )
+    return rows
 
 
 def _render_arena_tab(config: Config) -> None:

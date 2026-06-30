@@ -234,6 +234,79 @@ def test_progress_event_rows_are_arrow_serializable():
     pa.Table.from_pandas(pd.DataFrame(rows))
 
 
+def test_candidate_mechanism_rows_preserve_status_and_rationale():
+    app = _streamlit_app()
+    session = {
+        "candidate_mechanisms": [
+            {
+                "name": "k8s readiness timeout",
+                "status": "supported",
+                "rationale": "Both joins failed waiting for k8s readiness.",
+            },
+            {
+                "name": "ssh wrapper failure",
+                "status": "rejected",
+                "rationale": "The wrapper only reported the remote timeout.",
+            },
+        ],
+    }
+
+    assert app._candidate_mechanism_rows(session) == [
+        {
+            "mechanism": "k8s readiness timeout",
+            "status": "supported",
+            "rationale": "Both joins failed waiting for k8s readiness.",
+        },
+        {
+            "mechanism": "ssh wrapper failure",
+            "status": "rejected",
+            "rationale": "The wrapper only reported the remote timeout.",
+        },
+    ]
+
+
+def test_failure_timeline_rows_preserve_event_context_and_limit():
+    app = _streamlit_app()
+    session = {
+        "failure_timeline": [
+            {
+                "timestamp": f"10:0{index}:00",
+                "source": "output.log",
+                "location": f"line {index}",
+                "event": f"event {index}",
+            }
+            for index in range(1, 7)
+        ],
+    }
+
+    assert app._failure_timeline_rows(session, limit=3) == [
+        {
+            "time": "10:01:00",
+            "source": "output.log: line 1",
+            "event": "event 1",
+        },
+        {
+            "time": "10:02:00",
+            "source": "output.log: line 2",
+            "event": "event 2",
+        },
+        {
+            "time": "10:03:00",
+            "source": "output.log: line 3",
+            "event": "event 3",
+        },
+    ]
+
+
+def test_result_helpers_handle_older_sessions_without_v2_fields():
+    app = _streamlit_app()
+    session = {"summary": "Timed out", "root_cause": ""}
+
+    assert app._candidate_mechanism_rows(session) == []
+    assert app._failure_timeline_rows(session) == []
+    assert app._primary_finding(session) == "Timed out"
+
+
 def test_diagnosis_session_persists_probe_results(tmp_path):
     app = _streamlit_app()
     report = DiagnosisReport(
