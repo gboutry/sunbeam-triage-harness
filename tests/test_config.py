@@ -22,6 +22,9 @@ stall_limit = 2
 min_evidence_items = 3
 max_tool_result_chars = 42000
 
+[arena]
+models = ["model/a", "model/b"]
+
 [paths]
 artifact_root = "cache"
 output_pattern = "report-{uuid}.html"
@@ -42,6 +45,7 @@ output_pattern = "report-{uuid}.html"
     assert config.triage.stall_limit == 2
     assert config.triage.min_evidence_items == 3
     assert config.triage.max_tool_result_chars == 42000
+    assert config.arena.models == ["model/a", "model/b"]
     assert config.paths.artifact_root == Path("cache")
     assert config.output_path("abc") == Path("report-abc.html")
 
@@ -54,3 +58,4 @@ def test_config_uses_built_in_openrouter_auto_by_default(monkeypatch):
 
     assert config.llm.model == "openrouter/auto"
     assert config.llm.base_url == "https://openrouter.ai/api/v1"
+    assert config.arena.models == []

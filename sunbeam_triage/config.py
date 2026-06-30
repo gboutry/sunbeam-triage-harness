@@ -39,6 +39,11 @@ class TriageConfig:
 
 
 @dataclass
+class ArenaConfig:
+    models: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PathConfig:
     artifact_root: Path = Path("artifacts")
     output_pattern: str = "diagnostics-{uuid}.html"
@@ -49,6 +54,7 @@ class Config:
     swift: SwiftConfig = field(default_factory=SwiftConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     triage: TriageConfig = field(default_factory=TriageConfig)
+    arena: ArenaConfig = field(default_factory=ArenaConfig)
     paths: PathConfig = field(default_factory=PathConfig)
 
     @classmethod
@@ -100,6 +106,11 @@ class Config:
         config.triage.max_tool_result_chars = int(
             triage.get("max_tool_result_chars", config.triage.max_tool_result_chars)
         )
+
+        arena = data.get("arena", {})
+        config.arena.models = [
+            str(model) for model in arena.get("models", config.arena.models)
+        ]
 
         paths = data.get("paths", {})
         config.paths.artifact_root = Path(

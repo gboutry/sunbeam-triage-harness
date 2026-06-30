@@ -9,6 +9,12 @@ model = "deepseek/deepseek-v4-pro:floor"
 api_key_env = "OPENROUTER_API_KEY"
 timeout_seconds = 120
 
+[arena]
+models = [
+  "deepseek/deepseek-v4-pro:floor",
+  "openrouter/auto",
+]
+
 [paths]
 artifact_root = "artifacts"
 output_pattern = "diagnostics-{uuid}.html"

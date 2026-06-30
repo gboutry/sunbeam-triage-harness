@@ -8,9 +8,16 @@ from typing import Any
 import streamlit as st
 
 from sunbeam_triage.config import Config
+from sunbeam_triage.arena import ArenaOptions, ArenaRunner
 from sunbeam_triage.evidence import EvidenceCollector
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
 from sunbeam_triage.render import render_html
+from sunbeam_triage.sessions import (
+    append_session_event,
+    list_session_records,
+    load_session_record,
+    save_session_snapshot,
+)
 from sunbeam_triage.swift import SwiftMirror
 from sunbeam_triage.tool_activity import analyze_tool_activity
 from sunbeam_triage.triage_state import BudgetProfile, resolve_triage_budget
@@ -72,6 +79,7 @@ def main() -> None:
 
 def _initialize_state(config: Config) -> None:
     st.session_state.setdefault("selected_uuid", "")
+    st.session_state.setdefault("selected_arena_id", "")
     st.session_state.setdefault("pending_attachments", [])
     if not st.session_state["selected_uuid"]:
         sessions = list_saved_sessions(config.paths.artifact_root)
@@ -100,6 +108,27 @@ def _sidebar(config: Config) -> str:
                 budget,
             )
 
+        with st.expander("Arena"):
+            with st.form("start-arena", clear_on_submit=False):
+                arena_uuid = st.text_input("Arena UUID")
+                arena_models = st.text_input(
+                    "Contenders",
+                    value=", ".join(config.arena.models),
+                )
+                arena_budget = st.selectbox(
+                    "Arena budget",
+                    ["default", "quick", "hard"],
+                    index=0,
+                )
+                arena_submitted = st.form_submit_button("Start arena")
+            if arena_submitted:
+                _start_arena(
+                    config,
+                    arena_uuid.strip(),
+                    [item.strip() for item in arena_models.split(",") if item.strip()],
+                    arena_budget,
+                )
+
         st.divider()
         query = st.text_input("Search history")
         sessions = list_saved_sessions(config.paths.artifact_root)
@@ -117,6 +146,32 @@ def _sidebar(config: Config) -> str:
                 st.session_state["selected_uuid"] = item["uuid"]
 
     return st.session_state.get("selected_uuid", "")
+
+
+def _start_arena(config: Config, uuid: str, models: list[str], budget: str) -> None:
+    if not uuid:
+        st.sidebar.error("Enter a Solutions Run UUID.")
+        return
+    if len(models) < 2:
+        st.sidebar.error("Enter at least two contender models.")
+        return
+    with st.status(f"Running arena {uuid}", expanded=True) as status:
+        try:
+            st.write("Downloading artifacts")
+            SwiftMirror(config.swift, config.paths.artifact_root).mirror_uuid(
+                uuid,
+                continue_on_error=True,
+            )
+            st.write(f"Running {len(models)} contenders")
+            session = ArenaRunner(config).run(
+                uuid,
+                ArenaOptions(models=models, budget=budget),
+            )
+            st.session_state["selected_arena_id"] = session["session_id"]
+            status.update(label="Arena complete", state="complete")
+        except Exception as exc:
+            status.update(label="Arena failed", state="error")
+            st.error(str(exc))
 
 
 def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None:
@@ -199,7 +254,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(render_html(pack, report), encoding="utf-8")
 
-            save_ui_session(
+            _persist_diagnosis_session(
                 run_config.paths.artifact_root,
                 _session_from_diagnosis(
                     uuid=uuid,
@@ -217,7 +272,7 @@ def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None
             status.update(label="Diagnosis complete", state="complete")
         except Exception as exc:
             status.update(label="Diagnosis failed", state="error")
-            save_ui_session(
+            _persist_diagnosis_session(
                 run_config.paths.artifact_root,
                 {
                     "uuid": uuid,
@@ -316,16 +371,18 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
     )
     session.setdefault("exchanges", []).extend(llm_client.exchanges)
     session["updated_at"] = _now()
-    save_ui_session(config.paths.artifact_root, session)
+    _persist_diagnosis_session(config.paths.artifact_root, session)
     st.session_state["pending_attachments"] = []
 
 
 def _render_context_panel(config: Config, session: dict[str, Any] | None) -> None:
     st.subheader("Context")
     if not session:
-        st.info("Select a diagnosis to inspect context.")
+        tabs = st.tabs(["Arenas"])
+        with tabs[0]:
+            _render_arena_tab(config)
         return
-    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "API"])
+    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "API", "Arenas"])
     with tabs[0]:
         _render_evidence_tab(session)
     with tabs[1]:
@@ -334,6 +391,151 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         _render_tool_activity_tab(session)
     with tabs[3]:
         st.json(session.get("exchanges", []), expanded=False)
+    with tabs[4]:
+        _render_arena_tab(config)
+
+
+def _render_arena_tab(config: Config) -> None:
+    records = [
+        record
+        for record in list_session_records(config.paths.artifact_root)
+        if record.get("session_type") == "arena"
+    ]
+    if not records:
+        st.info("No arena records found.")
+        return
+    selected = st.selectbox(
+        "Arena",
+        records,
+        index=_selected_arena_index(records),
+        format_func=lambda item: f"{item['uuid']} · {item['status']}",
+    )
+    st.session_state["selected_arena_id"] = selected["session_id"]
+    loaded = load_session_record(config.paths.artifact_root, selected["session_id"])
+    if not loaded:
+        st.error("Arena record is missing.")
+        return
+    arena = loaded["snapshot"]
+    reveal = "verdict" in arena
+    st.caption(f"{arena['uuid']} · {arena['status']}")
+    if arena.get("output"):
+        st.write(f"Report: `{arena['output']}`")
+    for contender in arena.get("contenders", []):
+        label = _arena_contender_label(contender, reveal_model=reveal)
+        with st.expander(label, expanded=True):
+            if contender.get("status") != "completed":
+                st.error(contender.get("error", "Contender failed."))
+                continue
+            report = contender.get("report", {})
+            st.markdown("**Summary**")
+            st.write(report.get("summary", ""))
+            st.markdown("**Root Cause**")
+            st.write(report.get("root_cause", ""))
+            st.caption(f"Confidence: {report.get('confidence', '')}")
+    _render_arena_verdict_form(config, arena)
+
+
+def _selected_arena_index(records: list[dict[str, Any]]) -> int:
+    selected_id = st.session_state.get("selected_arena_id", "")
+    for index, record in enumerate(records):
+        if record.get("session_id") == selected_id:
+            return index
+    return 0
+
+
+def _render_arena_verdict_form(config: Config, arena: dict[str, Any]) -> None:
+    contenders = [
+        contender
+        for contender in arena.get("contenders", [])
+        if contender.get("status") == "completed"
+    ]
+    if len(contenders) < 2:
+        return
+    contender_ids = [str(contender["contender_id"]) for contender in contenders]
+    with st.form(f"arena-verdict-{arena['session_id']}"):
+        winner = st.selectbox("Winner", contender_ids)
+        rubric: dict[str, dict[str, int]] = {}
+        for contender_id in contender_ids:
+            st.markdown(f"**Contender {contender_id}**")
+            rubric[contender_id] = {
+                "root_cause": st.slider(
+                    f"{contender_id} root cause",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                ),
+                "evidence": st.slider(
+                    f"{contender_id} evidence",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                ),
+                "timeline": st.slider(
+                    f"{contender_id} timeline",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                ),
+                "uncertainty": st.slider(
+                    f"{contender_id} uncertainty",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                ),
+                "next_steps": st.slider(
+                    f"{contender_id} next steps",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                ),
+            }
+        notes = st.text_area("Notes", value=arena.get("verdict", {}).get("notes", ""))
+        if st.form_submit_button("Save verdict"):
+            _save_arena_verdict(
+                config.paths.artifact_root,
+                arena,
+                winner=winner,
+                notes=notes,
+                rubric=rubric,
+            )
+            st.rerun()
+
+
+def _arena_contender_label(contender: dict[str, Any], *, reveal_model: bool) -> str:
+    label = f"Contender {contender.get('contender_id', '')}"
+    if reveal_model:
+        label += f" - {contender.get('model', '')}"
+    return label
+
+
+def _save_arena_verdict(
+    artifact_root: Path,
+    session: dict[str, Any],
+    *,
+    winner: str,
+    notes: str,
+    rubric: dict[str, dict[str, int]],
+) -> dict[str, Any]:
+    updated = dict(session)
+    updated["status"] = "judged"
+    updated["updated_at"] = _now()
+    updated["verdict"] = {
+        "winner": winner,
+        "notes": notes,
+        "rubric": rubric,
+        "created_at": _now(),
+    }
+    save_session_snapshot(artifact_root, updated)
+    append_session_event(
+        artifact_root,
+        str(updated["session_id"]),
+        {
+            "event": "arena_verdict_saved",
+            "created_at": updated["updated_at"],
+            "winner": winner,
+        },
+    )
+    return updated
 
 
 def _render_download_failures(session: dict[str, Any]) -> None:
@@ -464,6 +666,21 @@ def _session_from_diagnosis(
         "exchanges": exchanges,
         "download_failures": download_failures,
     }
+
+
+def _persist_diagnosis_session(
+    artifact_root: Path,
+    session: dict[str, Any],
+) -> None:
+    save_ui_session(artifact_root, session)
+    snapshot = {
+        **session,
+        "schema_version": 2,
+        "session_id": str(session["uuid"]),
+        "session_type": "diagnosis",
+        "status": "error" if session.get("error") else "completed",
+    }
+    save_session_snapshot(artifact_root, snapshot)
 
 
 def _report_from_session(session: dict[str, Any]) -> DiagnosisReport:

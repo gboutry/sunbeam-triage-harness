@@ -42,3 +42,24 @@ Run the Streamlit cockpit with:
 ```bash
 OPENROUTER_API_KEY=<key> uv run streamlit run streamlit_app.py
 ```
+
+## Multi-model arena
+
+Run the same UUID through several OpenRouter-compatible models and write a
+combined comparison report:
+
+```bash
+uv run sunbeam-triage-arena run <uuid> --models model/a,model/b
+```
+
+If `[arena] models = [...]` is set in `config.toml`, `--models` can be omitted.
+Arena records are written under `artifacts/.sunbeam-triage/` as JSON snapshots
+plus append-only event logs. The Streamlit cockpit can score completed arenas
+with a fixed human rubric; contender model names stay hidden until the verdict is
+saved.
+
+Export judged arena records as provider-neutral JSONL:
+
+```bash
+uv run sunbeam-triage-arena export --output arena-eval.jsonl
+```

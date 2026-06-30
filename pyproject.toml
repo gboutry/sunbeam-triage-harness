@@ -16,6 +16,7 @@ dependencies = [
 [project.scripts]
 sunbeam-triage = "sunbeam_triage.cli:main"
 sunbeam-triage-analyze-rounds = "sunbeam_triage.analyze_rounds:main"
+sunbeam-triage-arena = "sunbeam_triage.arena_cli:main"
 
 [dependency-groups]
 dev = [

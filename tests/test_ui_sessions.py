@@ -10,6 +10,7 @@ from sunbeam_triage.ui_helpers import (
     save_ui_session,
     session_store_root,
 )
+from sunbeam_triage.sessions import load_session_record, save_session_snapshot
 
 
 def _streamlit_app():
@@ -189,3 +190,83 @@ def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
     assert loaded.alternatives_considered[0].hypothesis == "Database outage"
     assert loaded.missing_evidence == ["Need neutron-server timing."]
     assert loaded.stop_reason == "sufficient_evidence"
+
+
+def test_arena_contender_label_hides_model_until_verdict():
+    app = _streamlit_app()
+    contender = {"contender_id": "A", "model": "model/a"}
+
+    assert app._arena_contender_label(contender, reveal_model=False) == "Contender A"
+    assert app._arena_contender_label(contender, reveal_model=True) == "Contender A - model/a"
+
+
+def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tmp_path):
+    app = _streamlit_app()
+    artifact_root = tmp_path / "artifacts"
+    save_session_snapshot(
+        artifact_root,
+        {
+            "schema_version": 2,
+            "session_id": "arena-sample",
+            "session_type": "arena",
+            "uuid": "sample-uuid",
+            "updated_at": "2026-06-30T12:00:00Z",
+            "summary": "Arena",
+            "status": "completed",
+            "contenders": [
+                {"contender_id": "A", "model": "model/a", "report": {"summary": "A"}},
+                {"contender_id": "B", "model": "model/b", "report": {"summary": "B"}},
+            ],
+        },
+    )
+    session = load_session_record(artifact_root, "arena-sample")["snapshot"]
+
+    updated = app._save_arena_verdict(
+        artifact_root,
+        session,
+        winner="B",
+        notes="B had better evidence.",
+        rubric={
+            "A": {
+                "root_cause": 2,
+                "evidence": 2,
+                "timeline": 1,
+                "uncertainty": 2,
+                "next_steps": 2,
+            },
+            "B": {
+                "root_cause": 5,
+                "evidence": 5,
+                "timeline": 4,
+                "uncertainty": 4,
+                "next_steps": 5,
+            },
+        },
+    )
+
+    loaded = load_session_record(artifact_root, "arena-sample")
+    assert updated["status"] == "judged"
+    assert loaded["snapshot"]["verdict"]["winner"] == "B"
+    assert [event["event"] for event in loaded["events"]] == ["arena_verdict_saved"]
+    assert load_ui_session(artifact_root, "sample-uuid") is None
+
+
+def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
+    app = _streamlit_app()
+    artifact_root = tmp_path / "artifacts"
+    session = {
+        "uuid": "sample-uuid",
+        "model": "model/a",
+        "summary": "Diagnosis summary",
+        "confidence": "supported",
+        "updated_at": "2026-06-30T12:00:00Z",
+        "chat": [],
+    }
+
+    app._persist_diagnosis_session(artifact_root, session)
+
+    assert load_ui_session(artifact_root, "sample-uuid") == session
+    loaded = load_session_record(artifact_root, "sample-uuid")
+    assert loaded["snapshot"]["schema_version"] == 2
+    assert loaded["snapshot"]["session_type"] == "diagnosis"
+    assert loaded["snapshot"]["summary"] == "Diagnosis summary"
