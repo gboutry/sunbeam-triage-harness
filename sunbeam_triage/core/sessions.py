@@ -81,19 +81,24 @@ def export_judged_arenas(artifact_root: Path, output: Path) -> int:
 
 
 def _session_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+    chat = snapshot.get("chat", [])
     return {
         "schema_version": int(snapshot.get("schema_version", 1)),
         "session_id": str(snapshot.get("session_id", snapshot.get("uuid", ""))),
         "session_type": str(snapshot.get("session_type", "diagnosis")),
         "uuid": str(snapshot.get("uuid", "")),
+        "model": str(snapshot.get("model", "")),
         "summary": str(snapshot.get("summary", "")),
+        "confidence": str(snapshot.get("confidence", "")),
         "status": str(snapshot.get("status", "")),
         "updated_at": str(snapshot.get("updated_at", "")),
+        "chat_count": len(chat) if isinstance(chat, list) else 0,
     }
 
 
 def _legacy_snapshot(session_id: str, session: dict[str, Any]) -> dict[str, Any]:
     return {
+        **session,
         "schema_version": 1,
         "session_id": session_id,
         "session_type": "diagnosis",
@@ -101,7 +106,6 @@ def _legacy_snapshot(session_id: str, session: dict[str, Any]) -> dict[str, Any]
         "updated_at": str(session.get("updated_at", "")),
         "summary": str(session.get("summary", "")),
         "status": "legacy",
-        "legacy": session,
     }
 
 

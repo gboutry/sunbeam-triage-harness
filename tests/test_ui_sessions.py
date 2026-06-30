@@ -11,12 +11,7 @@ from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
 from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.core.progress import ProgressEvent
 from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
-from sunbeam_triage.core.ui_sessions import (
-    list_saved_sessions,
-    load_ui_session,
-    save_ui_session,
-    session_store_root,
-)
+from sunbeam_triage.core.ui_sessions import save_ui_session, session_store_root
 from sunbeam_triage.core.use_cases import (
     ArenaVerdictRequest,
     TriageUseCases,
@@ -40,6 +35,7 @@ def _streamlit_app():
 
 
 def test_session_store_round_trips_and_lists_recent_first(tmp_path):
+    app = _streamlit_app()
     artifact_root = tmp_path / "artifacts"
     older = {
         "uuid": "older-uuid",
@@ -60,21 +56,35 @@ def test_session_store_round_trips_and_lists_recent_first(tmp_path):
     save_ui_session(artifact_root, older)
     save_ui_session(artifact_root, newer)
 
-    assert load_ui_session(artifact_root, "newer-uuid") == newer
-    assert list_saved_sessions(artifact_root) == [
+    assert app._load_diagnosis_session(artifact_root, "newer-uuid") == {
+        **newer,
+        "schema_version": 1,
+        "session_id": "newer-uuid",
+        "session_type": "diagnosis",
+        "status": "legacy",
+    }
+    assert app._list_diagnosis_sessions(artifact_root) == [
         {
+            "schema_version": 1,
             "uuid": "newer-uuid",
+            "session_id": "newer-uuid",
+            "session_type": "diagnosis",
             "model": "model/b",
             "summary": "Newer summary",
             "confidence": "confirmed",
+            "status": "legacy",
             "updated_at": "2026-06-24T11:00:00Z",
             "chat_count": 1,
         },
         {
+            "schema_version": 1,
             "uuid": "older-uuid",
+            "session_id": "older-uuid",
+            "session_type": "diagnosis",
             "model": "model/a",
             "summary": "Older summary",
             "confidence": "supported",
+            "status": "legacy",
             "updated_at": "2026-06-24T10:00:00Z",
             "chat_count": 0,
         },
@@ -83,7 +93,59 @@ def test_session_store_round_trips_and_lists_recent_first(tmp_path):
 
 
 def test_load_ui_session_returns_none_for_missing_uuid(tmp_path):
-    assert load_ui_session(tmp_path / "artifacts", "missing") is None
+    app = _streamlit_app()
+
+    assert app._load_diagnosis_session(tmp_path / "artifacts", "missing") is None
+
+
+def test_diagnosis_history_reads_v2_sessions_and_excludes_arenas(tmp_path):
+    app = _streamlit_app()
+    artifact_root = tmp_path / "artifacts"
+    save_session_snapshot(
+        artifact_root,
+        {
+            "schema_version": 2,
+            "session_id": "sample-uuid",
+            "session_type": "diagnosis",
+            "uuid": "sample-uuid",
+            "model": "model/a",
+            "summary": "Diagnosis summary",
+            "confidence": "supported",
+            "updated_at": "2026-06-30T12:00:00Z",
+            "chat": [{"role": "user", "content": "What next?"}],
+            "status": "completed",
+        },
+    )
+    save_session_snapshot(
+        artifact_root,
+        {
+            "schema_version": 2,
+            "session_id": "arena-sample",
+            "session_type": "arena",
+            "uuid": "sample-uuid",
+            "summary": "Arena summary",
+            "status": "completed",
+            "updated_at": "2026-06-30T12:05:00Z",
+        },
+    )
+
+    assert app._list_diagnosis_sessions(artifact_root) == [
+        {
+            "schema_version": 2,
+            "uuid": "sample-uuid",
+            "session_id": "sample-uuid",
+            "session_type": "diagnosis",
+            "model": "model/a",
+            "summary": "Diagnosis summary",
+            "confidence": "supported",
+            "status": "completed",
+            "updated_at": "2026-06-30T12:00:00Z",
+            "chat_count": 1,
+        }
+    ]
+    assert app._load_diagnosis_session(artifact_root, "sample-uuid")["summary"] == (
+        "Diagnosis summary"
+    )
 
 
 def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
@@ -448,6 +510,7 @@ def test_arena_contender_label_hides_model_until_verdict():
 
 
 def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tmp_path):
+    app = _streamlit_app()
     artifact_root = tmp_path / "artifacts"
     config = Config.load(None)
     config.paths.artifact_root = artifact_root
@@ -500,10 +563,10 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
     assert loaded is not None
     assert loaded["snapshot"]["verdict"]["winner"] == "B"
     assert [event["event"] for event in loaded["events"]] == ["arena_verdict_saved"]
-    assert load_ui_session(artifact_root, "sample-uuid") is None
+    assert app._load_diagnosis_session(artifact_root, "sample-uuid") is None
 
 
-def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
+def test_persist_diagnosis_session_writes_only_v2_snapshot(tmp_path):
     artifact_root = tmp_path / "artifacts"
     session = {
         "uuid": "sample-uuid",
@@ -516,7 +579,7 @@ def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
 
     persist_diagnosis_session(artifact_root, session)
 
-    assert load_ui_session(artifact_root, "sample-uuid") == session
+    assert not (artifact_root / ".sunbeam-triage-ui").exists()
     loaded = load_session_record(artifact_root, "sample-uuid")
     assert loaded is not None
     assert loaded["snapshot"]["schema_version"] == 2

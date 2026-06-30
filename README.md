@@ -69,10 +69,11 @@ uv run sunbeam-triage-arena run <uuid> --models model/a,model/b
 ```
 
 If `[arena] models = [...]` is set in `config.toml`, `--models` can be omitted.
-Arena records are written under `artifacts/.sunbeam-triage/` as JSON snapshots
-plus append-only event logs. The Streamlit cockpit can score completed arenas
-with a fixed human rubric; contender model names stay hidden until the verdict is
-saved.
+Session records are written under `artifacts/.sunbeam-triage/` as JSON
+snapshots plus append-only event logs. The Streamlit cockpit can score completed
+arenas with a fixed human rubric; contender model names stay hidden until the
+verdict is saved. Older diagnosis records under `artifacts/.sunbeam-triage-ui/`
+are read for compatibility, but new sessions use `.sunbeam-triage`.
 
 Export judged arena records as provider-neutral JSONL:
 

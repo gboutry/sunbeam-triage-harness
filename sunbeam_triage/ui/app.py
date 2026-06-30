@@ -16,7 +16,6 @@ from sunbeam_triage.core.sessions import (
     load_session_record,
 )
 from sunbeam_triage.core.tool_activity import analyze_tool_activity
-from sunbeam_triage.core.ui_sessions import list_saved_sessions, load_ui_session
 from sunbeam_triage.core.use_cases import (
     ArenaRetryRequest,
     ArenaRunRequest,
@@ -87,7 +86,7 @@ def _initialize_state(config: Config) -> None:
     st.session_state.setdefault("pending_run", None)
     st.session_state.setdefault("active_progress_events", [])
     if not st.session_state["selected_uuid"]:
-        sessions = list_saved_sessions(config.paths.artifact_root)
+        sessions = _list_diagnosis_sessions(config.paths.artifact_root)
         if sessions:
             st.session_state["selected_uuid"] = sessions[0]["uuid"]
 
@@ -140,7 +139,7 @@ def _sidebar(config: Config) -> str:
 
         st.divider()
         query = st.text_input("Search history")
-        sessions = list_saved_sessions(config.paths.artifact_root)
+        sessions = _list_diagnosis_sessions(config.paths.artifact_root)
         if query:
             sessions = [
                 item
@@ -306,7 +305,28 @@ def _start_diagnosis(
 def _load_active_session(config: Config, uuid: str) -> dict[str, Any] | None:
     if not uuid:
         return None
-    return load_ui_session(config.paths.artifact_root, uuid)
+    return _load_diagnosis_session(config.paths.artifact_root, uuid)
+
+
+def _list_diagnosis_sessions(artifact_root: Path) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in list_session_records(artifact_root)
+        if record.get("session_type") == "diagnosis"
+    ]
+
+
+def _load_diagnosis_session(
+    artifact_root: Path,
+    session_id: str,
+) -> dict[str, Any] | None:
+    loaded = load_session_record(artifact_root, session_id)
+    if not loaded:
+        return None
+    snapshot = loaded["snapshot"]
+    if snapshot.get("session_type") != "diagnosis":
+        return None
+    return snapshot
 
 
 def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> None:

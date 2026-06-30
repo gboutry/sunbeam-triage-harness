@@ -98,6 +98,32 @@ def test_session_listing_reads_v2_and_legacy_without_rewriting_legacy(tmp_path):
     assert json.loads(legacy_path.read_text(encoding="utf-8")) == legacy
 
 
+def test_legacy_session_load_preserves_diagnosis_fields_top_level(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    legacy = {
+        "uuid": "legacy-uuid",
+        "model": "model/a",
+        "summary": "Legacy diagnosis",
+        "confidence": "supported",
+        "updated_at": "2026-06-29T10:00:00Z",
+        "artifact_root": str(artifact_root / "legacy-uuid"),
+        "chat": [{"role": "user", "content": "What next?"}],
+    }
+    save_ui_session(artifact_root, legacy)
+
+    loaded = load_session_record(artifact_root, "legacy-uuid")
+
+    assert loaded is not None
+    assert loaded["events"] == []
+    assert loaded["snapshot"] == {
+        **legacy,
+        "schema_version": 1,
+        "session_id": "legacy-uuid",
+        "session_type": "diagnosis",
+        "status": "legacy",
+    }
+
+
 def test_export_judged_arenas_writes_provider_neutral_jsonl(tmp_path):
     artifact_root = tmp_path / "artifacts"
     save_session_snapshot(

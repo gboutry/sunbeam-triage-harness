@@ -21,7 +21,6 @@ from .triage_state import (
     parse_budget_name,
     resolve_triage_budget,
 )
-from .ui_sessions import save_ui_session
 
 
 @dataclass(frozen=True)
@@ -432,7 +431,6 @@ def session_from_diagnosis(
 
 
 def persist_diagnosis_session(artifact_root: Path, session: dict[str, Any]) -> None:
-    save_ui_session(artifact_root, session)
     snapshot = {
         **session,
         "schema_version": 2,
