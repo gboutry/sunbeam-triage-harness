@@ -7,12 +7,12 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from .evidence import EvidencePack
-from .llm import DiagnosisReport
+from ..core.evidence import EvidencePack
+from ..core.llm import DiagnosisReport
+from ..core.sessions import SESSION_DIR_NAME
 
 
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
-SESSION_DIR_NAME = ".sunbeam-triage-ui"
 
 
 @dataclass(frozen=True)

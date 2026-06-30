@@ -35,7 +35,8 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
     result = subprocess.run(
         [
             sys.executable,
-            "analyze.py",
+            "-m",
+            "sunbeam_triage.cli",
             "sample-uuid",
             "--offline",
             "--config",
@@ -88,7 +89,8 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
     result = subprocess.run(
         [
             sys.executable,
-            "analyze.py",
+            "-m",
+            "sunbeam_triage.cli",
             "sample-uuid",
             "--offline",
             "--config",

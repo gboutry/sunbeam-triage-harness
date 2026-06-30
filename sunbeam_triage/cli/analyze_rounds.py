@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .tool_activity import analyze_tool_activity
+from ..core.tool_activity import analyze_tool_activity
 
 
 def build_parser() -> argparse.ArgumentParser:

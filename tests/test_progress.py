@@ -1,4 +1,4 @@
-from sunbeam_triage.progress import (
+from sunbeam_triage.core.progress import (
     ProgressEvent,
     event_from_tool_call,
     summarize_progress_events,

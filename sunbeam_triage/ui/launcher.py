@@ -20,6 +20,6 @@ def main(argv: list[str] | None = None) -> int | None:
 
 
 def _app_path() -> Path:
-    import streamlit_app
+    from . import app
 
-    return Path(streamlit_app.__file__).resolve()
+    return Path(app.__file__).resolve()

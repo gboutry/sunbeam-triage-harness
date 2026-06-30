@@ -7,22 +7,22 @@ from typing import Any
 
 import streamlit as st
 
-from sunbeam_triage.arena import ArenaOptions, ArenaRunner
-from sunbeam_triage.config import Config
-from sunbeam_triage.evidence import EvidenceCollector
-from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
-from sunbeam_triage.progress import ProgressEvent, ProgressSink, summarize_progress_events
-from sunbeam_triage.render import render_html
-from sunbeam_triage.sessions import (
+from sunbeam_triage.core.arena import ArenaOptions, ArenaRunner
+from sunbeam_triage.core.config import Config
+from sunbeam_triage.core.evidence import EvidenceCollector
+from sunbeam_triage.core.llm import DiagnosisReport, OpenRouterClient
+from sunbeam_triage.core.progress import ProgressEvent, ProgressSink, summarize_progress_events
+from sunbeam_triage.core.render import render_html
+from sunbeam_triage.core.sessions import (
     append_session_event,
     list_session_records,
     load_session_record,
     save_session_snapshot,
 )
-from sunbeam_triage.swift import SwiftMirror
-from sunbeam_triage.tool_activity import analyze_tool_activity
-from sunbeam_triage.triage_state import BudgetProfile, resolve_triage_budget
-from sunbeam_triage.ui_helpers import (
+from sunbeam_triage.core.swift import SwiftMirror
+from sunbeam_triage.core.tool_activity import analyze_tool_activity
+from sunbeam_triage.core.triage_state import BudgetProfile, resolve_triage_budget
+from sunbeam_triage.ui.helpers import (
     build_followup_context,
     evidence_line_map,
     list_artifact_files,

@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from sunbeam_triage.evidence import EvidenceCollector
-from sunbeam_triage.llm import (
+from sunbeam_triage.core.evidence import EvidenceCollector
+from sunbeam_triage.core.llm import (
     AlternativeConsidered,
     DiagnosisReport,
     ReportEvidence,
     TimelineEvent,
 )
-from sunbeam_triage.render import render_html
+from sunbeam_triage.core.render import render_html
 
 
 def test_render_html_escapes_content_and_includes_sections():

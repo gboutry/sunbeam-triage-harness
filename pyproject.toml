@@ -17,8 +17,8 @@ dependencies = [
 sunbeam-triage = "sunbeam_triage.cli:main"
 sunbeam-triage-cli = "sunbeam_triage.cli:main"
 sunbeam-triage-ui = "sunbeam_triage.ui:main"
-sunbeam-triage-analyze-rounds = "sunbeam_triage.analyze_rounds:main"
-sunbeam-triage-arena = "sunbeam_triage.arena_cli:main"
+sunbeam-triage-analyze-rounds = "sunbeam_triage.cli.analyze_rounds:main"
+sunbeam-triage-arena = "sunbeam_triage.cli.arena:main"
 
 [dependency-groups]
 dev = [
@@ -27,6 +27,3 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["sunbeam_triage*"]
-
-[tool.setuptools]
-py-modules = ["streamlit_app"]

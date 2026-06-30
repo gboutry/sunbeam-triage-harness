@@ -43,7 +43,7 @@ uv run sunbeam-triage-cli <uuid> --output /tmp/diagnostics-{uuid}.html
 ```bash
 uv sync --dev
 uv run pytest -q
-uv run python -m compileall -q analyze.py streamlit_app.py sunbeam_triage
+uv run python -m compileall -q sunbeam_triage tests
 ```
 
 Run the Streamlit cockpit with:

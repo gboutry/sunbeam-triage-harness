@@ -4,12 +4,12 @@ import argparse
 import json
 import sys
 
-from .config import Config
-from .evidence import EvidenceCollector
-from .llm import DiagnosisReport, OpenRouterClient
-from .render import render_html
-from .swift import SwiftMirror
-from .triage_state import BudgetProfile, resolve_triage_budget
+from ..core.config import Config
+from ..core.evidence import EvidenceCollector
+from ..core.llm import DiagnosisReport, OpenRouterClient
+from ..core.render import render_html
+from ..core.swift import SwiftMirror
+from ..core.triage_state import BudgetProfile, resolve_triage_budget
 
 
 def build_parser() -> argparse.ArgumentParser:

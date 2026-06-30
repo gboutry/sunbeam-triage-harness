@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
 
-from sunbeam_triage.arena import ArenaOptions, ArenaRunner, render_arena_html
-from sunbeam_triage.config import Config
-from sunbeam_triage.llm import DiagnosisReport
-from sunbeam_triage.sessions import load_session_record
-from sunbeam_triage.triage_state import TriageLoopOptions
+from sunbeam_triage.core.arena import ArenaOptions, ArenaRunner, render_arena_html
+from sunbeam_triage.core.config import Config
+from sunbeam_triage.core.llm import DiagnosisReport
+from sunbeam_triage.core.sessions import load_session_record
+from sunbeam_triage.core.triage_state import TriageLoopOptions
 
 
 class FakeArenaClient:

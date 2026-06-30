@@ -4,10 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .ui_helpers import SESSION_DIR_NAME
-
-
 STORE_DIR_NAME = ".sunbeam-triage"
+SESSION_DIR_NAME = ".sunbeam-triage-ui"
 
 
 def save_session_snapshot(artifact_root: Path, snapshot: dict[str, Any]) -> Path:

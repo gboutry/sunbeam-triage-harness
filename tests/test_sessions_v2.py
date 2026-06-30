@@ -1,14 +1,14 @@
 import json
 from pathlib import Path
 
-from sunbeam_triage.sessions import (
+from sunbeam_triage.core.sessions import (
     append_session_event,
     export_judged_arenas,
     load_session_record,
     list_session_records,
     save_session_snapshot,
 )
-from sunbeam_triage.ui_helpers import save_ui_session
+from sunbeam_triage.ui.helpers import save_ui_session
 
 
 def test_v2_session_snapshot_and_events_round_trip(tmp_path):

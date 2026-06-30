@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sunbeam_triage.config import Config
+from sunbeam_triage.core.config import Config
 
 
 def test_config_defaults_and_overrides(tmp_path, monkeypatch):

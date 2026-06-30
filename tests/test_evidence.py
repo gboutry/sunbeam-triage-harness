@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sunbeam_triage.evidence import EvidenceCollector
+from sunbeam_triage.core.evidence import EvidenceCollector
 
 
 def test_evidence_collector_identifies_first_failed_non_cleanup_step():

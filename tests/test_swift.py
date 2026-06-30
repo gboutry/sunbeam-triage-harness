@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 from urllib.error import HTTPError
 
-from sunbeam_triage.config import Config
-from sunbeam_triage.swift import SwiftMirror
+from sunbeam_triage.core.config import Config
+from sunbeam_triage.core.swift import SwiftMirror
 
 
 class FakeHttp:

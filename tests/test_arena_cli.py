@@ -41,7 +41,7 @@ artifact_root = "{artifact_root}"
         [
             sys.executable,
             "-m",
-            "sunbeam_triage.arena_cli",
+            "sunbeam_triage.cli.arena",
             "run",
             "sample-uuid",
             "--offline",
@@ -87,7 +87,7 @@ artifact_root = "{artifact_root}"
         [
             sys.executable,
             "-m",
-            "sunbeam_triage.arena_cli",
+            "sunbeam_triage.cli.arena",
             "run",
             "sample-uuid",
             "--offline",
@@ -160,7 +160,7 @@ artifact_root = "{artifact_root}"
         [
             sys.executable,
             "-m",
-            "sunbeam_triage.arena_cli",
+            "sunbeam_triage.cli.arena",
             "export",
             "--config",
             str(config_path),

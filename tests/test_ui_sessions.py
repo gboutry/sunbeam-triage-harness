@@ -5,24 +5,24 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 
-from sunbeam_triage.evidence import EvidenceCollector
-from sunbeam_triage.llm import DiagnosisReport, ReportEvidence
-from sunbeam_triage.probes import ProbeFinding, ProbeResult
-from sunbeam_triage.progress import ProgressEvent
-from sunbeam_triage.ui_helpers import (
+from sunbeam_triage.core.evidence import EvidenceCollector
+from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
+from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
+from sunbeam_triage.core.progress import ProgressEvent
+from sunbeam_triage.ui.helpers import (
     build_followup_context,
     list_saved_sessions,
     load_ui_session,
     save_ui_session,
     session_store_root,
 )
-from sunbeam_triage.sessions import load_session_record, save_session_snapshot
+from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
 
 
 def _streamlit_app():
     spec = importlib.util.spec_from_file_location(
         "streamlit_app_for_tests",
-        Path("streamlit_app.py"),
+        Path("sunbeam_triage/ui/app.py"),
     )
     assert spec is not None
     assert spec.loader is not None

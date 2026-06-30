@@ -2,7 +2,7 @@ import io
 import tarfile
 from pathlib import Path
 
-from sunbeam_triage.probes import run_preflight_probes
+from sunbeam_triage.core.probes import run_preflight_probes
 
 
 def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):

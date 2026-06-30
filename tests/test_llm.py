@@ -4,9 +4,9 @@ import tarfile
 
 import pytest
 
-from sunbeam_triage.config import Config
-from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
-from sunbeam_triage.triage_state import TriageLoopOptions
+from sunbeam_triage.core.config import Config
+from sunbeam_triage.core.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
+from sunbeam_triage.core.triage_state import TriageLoopOptions
 
 
 class FakeSdkResponse:

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from sunbeam_triage.llm import DiagnosisReport, ReportEvidence
-from sunbeam_triage.ui_helpers import (
+from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
+from sunbeam_triage.ui.helpers import (
     CapturingHttp,
     evidence_line_map,
     list_artifact_files,

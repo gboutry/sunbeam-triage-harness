@@ -1,6 +1,6 @@
 import json
 
-from sunbeam_triage.analyze_rounds import main
+from sunbeam_triage.cli.analyze_rounds import main
 
 
 def test_analyze_rounds_prints_session_summary(tmp_path, capsys):

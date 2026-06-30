@@ -2,7 +2,7 @@ import io
 import tarfile
 from pathlib import Path
 
-from sunbeam_triage.artifact_tools import (
+from sunbeam_triage.core.artifact_tools import (
     artifact_tool_definitions,
     execute_artifact_tool,
 )

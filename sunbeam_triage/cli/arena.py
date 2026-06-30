@@ -7,11 +7,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .arena import ArenaOptions, ArenaRunner
-from .config import Config
-from .llm import DiagnosisReport
-from .sessions import export_judged_arenas
-from .swift import SwiftMirror
+from ..core.arena import ArenaOptions, ArenaRunner
+from ..core.config import Config
+from ..core.llm import DiagnosisReport
+from ..core.sessions import export_judged_arenas
+from ..core.swift import SwiftMirror
 
 
 def build_parser() -> argparse.ArgumentParser:

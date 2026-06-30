@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_streamlit_app_does_not_use_deprecated_container_width_keyword():
-    tree = ast.parse(Path("streamlit_app.py").read_text(encoding="utf-8"))
+    tree = ast.parse(Path("sunbeam_triage/ui/app.py").read_text(encoding="utf-8"))
 
     deprecated_keywords = [
         keyword.lineno

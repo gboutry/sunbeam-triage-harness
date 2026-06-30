@@ -1,6 +1,6 @@
 import json
 
-from sunbeam_triage.triage_state import (
+from sunbeam_triage.core.triage_state import (
     BudgetProfile,
     InvestigationState,
     TriageLoopOptions,

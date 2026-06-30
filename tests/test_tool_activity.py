@@ -1,4 +1,4 @@
-from sunbeam_triage.tool_activity import analyze_tool_activity
+from sunbeam_triage.core.tool_activity import analyze_tool_activity
 
 
 def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():

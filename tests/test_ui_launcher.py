@@ -7,5 +7,5 @@ def test_streamlit_argv_launches_packaged_cockpit():
     argv = ui.streamlit_argv(["--server.port", "8502"])
 
     assert argv[:2] == ["streamlit", "run"]
-    assert Path(argv[2]).name == "streamlit_app.py"
+    assert Path(argv[2]).name == "app.py"
     assert argv[3:] == ["--server.port", "8502"]

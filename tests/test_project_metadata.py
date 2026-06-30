@@ -11,7 +11,7 @@ def test_pyproject_declares_package_script_and_dependencies():
     assert data["project"]["scripts"]["sunbeam-triage-ui"] == "sunbeam_triage.ui:main"
     assert (
         data["project"]["scripts"]["sunbeam-triage-analyze-rounds"]
-        == "sunbeam_triage.analyze_rounds:main"
+        == "sunbeam_triage.cli.analyze_rounds:main"
     )
     assert "streamlit" in data["project"]["dependencies"]
     assert "openrouter>=0.10.0" in data["project"]["dependencies"]
@@ -19,4 +19,4 @@ def test_pyproject_declares_package_script_and_dependencies():
     assert data["tool"]["setuptools"]["packages"]["find"]["include"] == [
         "sunbeam_triage*"
     ]
-    assert "streamlit_app" in data["tool"]["setuptools"]["py-modules"]
+    assert "py-modules" not in data["tool"]["setuptools"]
