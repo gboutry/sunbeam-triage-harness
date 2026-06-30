@@ -57,6 +57,21 @@ def test_evidence_redacts_obvious_secret_values():
     assert "OS_PASSWORD=<redacted>" in prompt
 
 
+def test_evidence_redacts_bearer_tokens(tmp_path):
+    _write_jobs(tmp_path, failed_step_name="Deploy sunbeam")
+    (tmp_path / "generated/sunbeam").mkdir(parents=True)
+    (tmp_path / "generated/sunbeam/output.log").write_text(
+        "ERROR Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        encoding="utf-8",
+    )
+
+    pack = EvidenceCollector(tmp_path, "uuid").collect()
+    prompt = pack.to_prompt_text()
+
+    assert "sk-or-v1-aaaaaaaa" not in prompt
+    assert "Authorization: Bearer <redacted>" in prompt
+
+
 def test_evidence_collector_uses_sunbeam_artifacts_for_human_named_sunbeam_steps(
     tmp_path,
 ):

@@ -10,6 +10,7 @@ from typing import Any
 from ..core.arena import ArenaOptions, ArenaRunner
 from ..core.config import Config
 from ..core.llm import DiagnosisReport
+from ..core.redaction import redact_text
 from ..core.sessions import export_judged_arenas
 from ..core.swift import SwiftMirror
 
@@ -123,7 +124,7 @@ class _PrecomputedClient:
         self.exchanges.append({
             "request": {
                 "model": self.model,
-                "messages": [{"role": "user", "content": evidence_text}],
+                "messages": [{"role": "user", "content": redact_text(evidence_text)}],
                 "session_id": kwargs.get("session_id"),
             },
             "response": {

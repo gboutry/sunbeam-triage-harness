@@ -37,6 +37,7 @@ from .llm_schema import (
 from .llm_tool_loop import ArtifactToolLoop
 from .llm_transport import OpenRouterTransport, cache_kwargs
 from .progress import ProgressSink
+from .redaction import redact_text
 from .triage_state import TriageLoopOptions
 
 __all__ = [
@@ -77,7 +78,7 @@ class OpenRouterClient:
                     "role": "system",
                     "content": diagnosis_system_prompt(),
                 },
-                {"role": "user", "content": evidence_text},
+                {"role": "user", "content": redact_text(evidence_text)},
             ],
             "response_format": {"type": "json_schema", "json_schema": REPORT_SCHEMA},
         }
@@ -179,8 +180,11 @@ class OpenRouterClient:
                     "role": "system",
                     "content": chat_system_prompt(),
                 },
-                {"role": "user", "content": context_text},
-                *messages,
+                {"role": "user", "content": redact_text(context_text)},
+                *[
+                    {**message, "content": redact_text(str(message.get("content", "")))}
+                    for message in messages
+                ],
             ],
         }
         if session_id:

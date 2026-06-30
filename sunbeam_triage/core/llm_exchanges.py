@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .redaction import redact_data, redact_text
+
 
 class ExchangeRecorder:
     def __init__(self) -> None:
@@ -31,8 +33,8 @@ class ExchangeRecorder:
         if calls:
             visible_response["tool_calls"] = [tool_call_dict(call) for call in calls]
         self.exchanges.append({
-            "request": json_safe(visible_request),
-            "response": json_safe(visible_response),
+            "request": redact_data(json_safe(visible_request)),
+            "response": redact_data(json_safe(visible_response)),
         })
 
 
@@ -41,7 +43,7 @@ def response_content(response: Any) -> str:
     message = choice.message
     if message.content is None:
         return ""
-    return str(message.content)
+    return redact_text(str(message.content))
 
 
 def response_json(response: Any) -> dict[str, Any]:

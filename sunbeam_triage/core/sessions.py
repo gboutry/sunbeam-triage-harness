@@ -5,11 +5,14 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
+from .redaction import redact_data
+
 STORE_DIR_NAME = ".sunbeam-triage"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
 
 
 def save_session_snapshot(artifact_root: Path, snapshot: dict[str, Any]) -> Path:
+    snapshot = redact_data(snapshot)
     session_id = str(snapshot["session_id"])
     path = _snapshot_path(artifact_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -22,6 +25,7 @@ def append_session_event(
     session_id: str,
     event: dict[str, Any],
 ) -> Path:
+    event = redact_data(event)
     path = _events_path(artifact_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
@@ -34,14 +38,16 @@ def load_session_record(artifact_root: Path, session_id: str) -> dict[str, Any] 
     snapshot_path = _snapshot_path(artifact_root, session_id)
     if snapshot_path.exists():
         return {
-            "snapshot": json.loads(snapshot_path.read_text(encoding="utf-8")),
-            "events": _read_events(_events_path(artifact_root, session_id)),
+            "snapshot": redact_data(
+                json.loads(snapshot_path.read_text(encoding="utf-8"))
+            ),
+            "events": redact_data(_read_events(_events_path(artifact_root, session_id))),
         }
     legacy_path = _legacy_session_path(artifact_root, session_id)
     if legacy_path.exists():
         legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
         return {
-            "snapshot": _legacy_snapshot(session_id, legacy),
+            "snapshot": redact_data(_legacy_snapshot(session_id, legacy)),
             "events": [],
         }
     return None
@@ -50,13 +56,13 @@ def load_session_record(artifact_root: Path, session_id: str) -> dict[str, Any] 
 def list_session_records(artifact_root: Path) -> list[dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for path in _sessions_dir(artifact_root).glob("*.json"):
-        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        snapshot = redact_data(json.loads(path.read_text(encoding="utf-8")))
         records[str(snapshot["session_id"])] = _session_summary(snapshot)
     for path in _legacy_sessions_dir(artifact_root).glob("*.json"):
         if path.stem in records:
             continue
         legacy = json.loads(path.read_text(encoding="utf-8"))
-        snapshot = _legacy_snapshot(path.stem, legacy)
+        snapshot = redact_data(_legacy_snapshot(path.stem, legacy))
         records[path.stem] = _session_summary(snapshot)
     return sorted(records.values(), key=itemgetter("updated_at"), reverse=True)
 
@@ -74,7 +80,9 @@ def export_judged_arenas(artifact_root: Path, output: Path) -> int:
             snapshot = loaded["snapshot"]
             if snapshot.get("status") != "judged" or "verdict" not in snapshot:
                 continue
-            stream.write(json.dumps(_arena_export_record(snapshot), sort_keys=True))
+            stream.write(
+                json.dumps(redact_data(_arena_export_record(snapshot)), sort_keys=True)
+            )
             stream.write("\n")
             count += 1
     return count

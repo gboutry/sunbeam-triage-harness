@@ -12,6 +12,7 @@ from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
 from .llm import DiagnosisReport, OpenRouterClient
 from .progress import ProgressEvent, ProgressSink, emit_progress
+from .redaction import redact_data, redact_text
 from .render import render_html
 from .sessions import append_session_event, load_session_record, save_session_snapshot
 from .swift import SwiftConfig, SwiftMirror
@@ -395,7 +396,7 @@ def session_from_diagnosis(
     probe_results: Any | None = None,
     progress_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    return redact_data({
         "uuid": uuid,
         "model": model,
         "summary": report.summary,
@@ -427,7 +428,7 @@ def session_from_diagnosis(
             for result in list(probe_results or [])
         ],
         "progress_events": list(progress_events or []),
-    }
+    })
 
 
 def persist_diagnosis_session(artifact_root: Path, session: dict[str, Any]) -> None:
@@ -524,7 +525,7 @@ def build_followup_context(
         for item in attachments:
             line = "" if item.get("line") is None else f":{item['line']}"
             parts.append(f"- {item.get('path', '')}{line}: {item.get('text', '')}")
-    return "\n".join(parts)
+    return redact_text("\n".join(parts))
 
 
 def _probe_context_lines(pack) -> list[str]:

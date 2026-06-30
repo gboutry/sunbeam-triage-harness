@@ -17,6 +17,10 @@ def test_list_artifact_files_sorts_files_and_excludes_manifest(tmp_path):
     (root / "generated/github-runner").mkdir(parents=True)
     (root / "generated/github-runner/jobs.json").write_text("{}", encoding="utf-8")
     (root / ".sunbeam-triage-manifest.json").write_text("[]", encoding="utf-8")
+    (root / ".sunbeam-triage/sessions").mkdir(parents=True)
+    (root / ".sunbeam-triage/sessions/uuid.json").write_text("{}", encoding="utf-8")
+    (root / ".sunbeam-triage-ui/sessions").mkdir(parents=True)
+    (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text("{}", encoding="utf-8")
 
     files = list_artifact_files(root)
 
@@ -64,6 +68,16 @@ def test_read_text_preview_bounds_large_text_files(tmp_path):
     assert preview.binary is False
 
 
+def test_read_text_preview_redacts_secret_values(tmp_path):
+    path = tmp_path / "secret.log"
+    path.write_text("Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", encoding="utf-8")
+
+    preview = read_text_preview(path)
+
+    assert "sk-or-v1-aaaaaaaa" not in preview.text
+    assert "Authorization: Bearer <redacted>" in preview.text
+
+
 def test_read_text_preview_marks_binary_files(tmp_path):
     path = tmp_path / "blob.bin"
     path.write_bytes(b"abc\x00def")
@@ -101,3 +115,25 @@ def test_capturing_http_redacts_authorization_and_records_exchange():
             "response": {"choices": [{"message": {"content": "{}"}}]},
         }
     ]
+
+
+def test_capturing_http_redacts_payload_and_response_content():
+    class EchoHttp:
+        def post_json(self, _url, payload, _headers):
+            return {"echo": payload["messages"][0]["content"]}
+
+    http = CapturingHttp(EchoHttp())
+
+    http.post_json(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+            "messages": [
+                {"role": "user", "content": "OS_PASSWORD=super-secret-value"}
+            ]
+        },
+        {},
+    )
+
+    exchange_text = str(http.exchanges)
+    assert "super-secret-value" not in exchange_text
+    assert "OS_PASSWORD=<redacted>" in exchange_text

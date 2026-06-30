@@ -6,6 +6,7 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
+from .redaction import redact_text
 from .sosreport_tools import (
     get_sosreport_file,
     list_sosreport_files,
@@ -14,6 +15,7 @@ from .sosreport_tools import (
 )
 
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
+STORE_DIR_NAME = ".sunbeam-triage"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
 DEFAULT_MAX_BYTES = 120_000
 MAX_BYTES_LIMIT = 250_000
@@ -335,7 +337,7 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "path": relative.as_posix(),
         "size_bytes": size,
-        "content": text,
+        "content": redact_text(text),
         "truncated": truncated,
         "binary": False,
     }
@@ -383,7 +385,7 @@ def _search_artifacts(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
                 matches.append({
                     "path": rel_posix,
                     "line": line_number,
-                    "excerpt": _search_excerpt(line),
+                    "excerpt": redact_text(_search_excerpt(line)),
                 })
         if truncated:
             break
@@ -453,7 +455,11 @@ def _is_unsafe_relative_path(path: Path) -> bool:
 
 
 def _is_internal_path(path: Path) -> bool:
-    return path.name == MANIFEST_NAME or SESSION_DIR_NAME in path.parts
+    return (
+        path.name == MANIFEST_NAME
+        or STORE_DIR_NAME in path.parts
+        or SESSION_DIR_NAME in path.parts
+    )
 
 
 def _is_archive_path(path: Path) -> bool:

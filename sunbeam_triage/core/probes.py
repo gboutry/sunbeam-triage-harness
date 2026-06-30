@@ -5,6 +5,8 @@ import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .redaction import redact_text
+
 K8S_NOT_READY = re.compile(
     r"Application 'k8s' is not ready|k8s.*wait timed out|wait timed out.*k8s",
     re.IGNORECASE,
@@ -570,4 +572,4 @@ def _line_time_seconds(line: str) -> int | None:
 
 
 def _excerpt(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()[:500]
+    return redact_text(re.sub(r"\s+", " ", text).strip())[:500]

@@ -342,6 +342,30 @@ def test_openrouter_client_records_redacted_exchanges_and_usage_metrics():
     ]
 
 
+def test_exchange_recorder_redacts_request_and_response_content():
+    response = FakeSdkResponse("token=AbcdEFGH1234567890abcdEFGH1234567890")
+    recorder = ExchangeRecorder()
+
+    recorder.record(
+        {
+            "model": "openrouter/auto",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "OS_PASSWORD=super-secret-value",
+                }
+            ],
+        },
+        response,
+    )
+
+    exchange_text = json.dumps(recorder.exchanges)
+    assert "super-secret-value" not in exchange_text
+    assert "AbcdEFGH1234567890" not in exchange_text
+    assert "OS_PASSWORD=<redacted>" in exchange_text
+    assert "token=<redacted>" in exchange_text
+
+
 def test_openrouter_client_records_json_serializable_sdk_usage_objects():
     sdk = FakeSdkClient(FakeSdkResponse("ok", usage=FakeSdkObjectUsage()))
     client = OpenRouterClient(_config("openrouter/auto"), sdk_client=sdk)
@@ -417,6 +441,42 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert "earliest event that explains the final failure surface" in system_prompt
     assert "A workload process crash is not sufficient evidence" in system_prompt
     assert "first meaningful error" not in system_prompt
+
+
+def test_openrouter_client_sends_and_records_redacted_tool_results(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    output = artifact_root / "generated/sunbeam/output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text(
+        "ERROR OS_PASSWORD=super-secret-value\n",
+        encoding="utf-8",
+    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/sunbeam/output.log"}),
+                ),
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context token=AbcdEFGH1234567890abcdEFGH1234567890",
+        [],
+        session_id="uuid",
+        artifact_root=artifact_root,
+    )
+
+    sent_text = json.dumps(sdk.chat.calls)
+    assert "super-secret-value" not in sent_text
+    assert "AbcdEFGH1234567890" not in sent_text
+    assert "OS_PASSWORD=<redacted>" in sent_text
+    assert "token=<redacted>" in sent_text
 
 
 def test_openrouter_client_deduplicates_repeated_tool_calls(tmp_path):

@@ -188,6 +188,42 @@ def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
     assert "Attached Context:" in context
 
 
+def test_build_followup_context_redacts_secret_values():
+    pack = EvidenceCollector(
+        Path("tests/fixtures/sample_uuid"), "sample-uuid"
+    ).collect()
+    report = DiagnosisReport(
+        summary="Timed out",
+        failure_surface="Deploy timeout",
+        confidence="supported",
+        root_cause="Readiness did not converge",
+        evidence=[
+            ReportEvidence(
+                path="generated/sunbeam/output.log",
+                line=2,
+                excerpt="OS_PASSWORD=super-secret-value",
+            )
+        ],
+    )
+
+    context = build_followup_context(
+        pack,
+        report,
+        attachments=[
+            {
+                "path": "generated/sunbeam/output.log",
+                "line": 2,
+                "text": "Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            }
+        ],
+    )
+
+    assert "super-secret-value" not in context
+    assert "sk-or-v1-aaaaaaaa" not in context
+    assert "OS_PASSWORD=<redacted>" in context
+    assert "Authorization: Bearer <redacted>" in context
+
+
 def test_build_followup_context_includes_deterministic_probe_findings():
     pack = EvidenceCollector(
         Path("tests/fixtures/sample_uuid"), "sample-uuid"
@@ -585,3 +621,47 @@ def test_persist_diagnosis_session_writes_only_v2_snapshot(tmp_path):
     assert loaded["snapshot"]["schema_version"] == 2
     assert loaded["snapshot"]["session_type"] == "diagnosis"
     assert loaded["snapshot"]["summary"] == "Diagnosis summary"
+
+
+def test_session_snapshots_are_redacted_on_save_and_legacy_load(tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    save_session_snapshot(
+        artifact_root,
+        {
+            "schema_version": 2,
+            "session_id": "sample-uuid",
+            "session_type": "diagnosis",
+            "uuid": "sample-uuid",
+            "updated_at": "2026-06-30T12:00:00Z",
+            "summary": "OS_PASSWORD=super-secret-value",
+            "status": "completed",
+        },
+    )
+
+    raw_v2 = (
+        artifact_root
+        / ".sunbeam-triage"
+        / "sessions"
+        / "sample-uuid.json"
+    ).read_text(encoding="utf-8")
+    assert "super-secret-value" not in raw_v2
+    assert "OS_PASSWORD=<redacted>" in raw_v2
+
+    save_ui_session(
+        artifact_root,
+        {
+            "uuid": "legacy-uuid",
+            "updated_at": "2026-06-29T10:00:00Z",
+            "summary": "token=AbcdEFGH1234567890abcdEFGH1234567890",
+        },
+    )
+    legacy_raw_path = (
+        artifact_root / ".sunbeam-triage-ui" / "sessions" / "legacy-uuid.json"
+    )
+    assert "AbcdEFGH1234567890" in legacy_raw_path.read_text(encoding="utf-8")
+
+    loaded = load_session_record(artifact_root, "legacy-uuid")
+
+    assert loaded is not None
+    assert "AbcdEFGH1234567890" not in loaded["snapshot"]["summary"]
+    assert loaded["snapshot"]["summary"] == "token=<redacted>"

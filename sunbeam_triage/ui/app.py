@@ -11,6 +11,7 @@ from sunbeam_triage.core.progress import (
     ProgressSink,
     summarize_progress_events,
 )
+from sunbeam_triage.core.redaction import redact_data
 from sunbeam_triage.core.sessions import (
     list_session_records,
     load_session_record,
@@ -877,6 +878,7 @@ def _render_files_tab(config: Config, session: dict[str, Any]) -> None:
 
 
 def _add_attachment(item: dict[str, Any]) -> None:
+    item = redact_data(item)
     attachments = st.session_state.setdefault("pending_attachments", [])
     if item not in attachments:
         attachments.append(item)

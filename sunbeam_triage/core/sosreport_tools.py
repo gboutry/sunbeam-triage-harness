@@ -6,6 +6,8 @@ from operator import itemgetter
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .redaction import redact_text
+
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_SEARCH_LIMIT = 50
 DEFAULT_MAX_BYTES = 120_000
@@ -93,7 +95,7 @@ def search_sosreport(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
                     matches.append({
                         "path": normalized,
                         "line": line_number,
-                        "excerpt": line.strip(),
+                        "excerpt": redact_text(line.strip()),
                     })
             if truncated:
                 break
@@ -162,7 +164,7 @@ def get_sosreport_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
         "archive_path": archive_ref["relative"],
         "path": requested,
         "size_bytes": member.size,
-        "content": text,
+        "content": redact_text(text),
         "truncated": truncated,
         "binary": False,
     }

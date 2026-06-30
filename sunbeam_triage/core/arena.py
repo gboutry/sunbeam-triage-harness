@@ -12,6 +12,7 @@ from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
 from .llm import OpenRouterClient
 from .progress import ProgressEvent, ProgressSink, emit_progress
+from .redaction import redact_text
 from .sessions import append_session_event, save_session_snapshot
 from .tool_activity import analyze_tool_activity
 from .triage_state import (
@@ -398,21 +399,21 @@ def render_arena_html(session: dict[str, Any]) -> str:
         "<head>",
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
-        f"<title>Arena: {escape(str(session.get('uuid', '')))}</title>",
+        f"<title>Arena: {_safe(str(session.get('uuid', '')))}</title>",
         "<style>",
         ARENA_CSS,
         "</style>",
         "</head>",
         "<body>",
-        f"<h1>Arena: {escape(str(session.get('uuid', '')))}</h1>",
-        f"<p>Status: {escape(str(session.get('status', '')))}</p>",
+        f"<h1>Arena: {_safe(str(session.get('uuid', '')))}</h1>",
+        f"<p>Status: {_safe(str(session.get('status', '')))}</p>",
     ]
     verdict = session.get("verdict")
     if isinstance(verdict, dict):
         body.append(
             f"<section><h2>Verdict</h2><p>Winner: "
-            f"{escape(str(verdict.get('winner', '')))}</p>"
-            f"<p>{escape(str(verdict.get('notes', '')))}</p></section>"
+            f"{_safe(str(verdict.get('winner', '')))}</p>"
+            f"<p>{_safe(str(verdict.get('notes', '')))}</p></section>"
         )
     body.append("<section><h2>Contenders</h2>")
     body.extend(
@@ -433,18 +434,18 @@ def _contender_html(contender: dict[str, Any], *, reveal_models: bool) -> str:
         report = {}
     return "\n".join([
         '<article class="contender">',
-        f"<h3>{escape(title)}</h3>",
-        f"<p>Status: {escape(str(contender.get('status', '')))}</p>",
-        f"<p><strong>Summary:</strong> {escape(str(report.get('summary', '')))}</p>",
+        f"<h3>{_safe(title)}</h3>",
+        f"<p>Status: {_safe(str(contender.get('status', '')))}</p>",
+        f"<p><strong>Summary:</strong> {_safe(str(report.get('summary', '')))}</p>",
         (
             f"<p><strong>Root cause:</strong> "
-            f"{escape(str(report.get('root_cause', '')))}</p>"
+            f"{_safe(str(report.get('root_cause', '')))}</p>"
         ),
         (
             f"<p><strong>Confidence:</strong> "
-            f"{escape(str(report.get('confidence', '')))}</p>"
+            f"{_safe(str(report.get('confidence', '')))}</p>"
         ),
-        f"<p>{escape(str(contender.get('error', '')))}</p>"
+        f"<p>{_safe(str(contender.get('error', '')))}</p>"
         if contender.get("error")
         else "",
         "</article>",
@@ -502,6 +503,10 @@ def _arena_summary(session: dict[str, Any]) -> str:
         if contender.get("status") == "completed"
     )
     return f"{completed}/{len(session['contenders'])} contenders completed"
+
+
+def _safe(value: str) -> str:
+    return escape(redact_text(str(value)))
 
 
 def _arena_progress_proxy(progress: ProgressSink | None) -> ProgressSink | None:

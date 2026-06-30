@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from ..core.llm import DiagnosisReport
+from ..core.redaction import redact_data, redact_text
 
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
+STORE_DIR_NAME = ".sunbeam-triage"
+SESSION_DIR_NAME = ".sunbeam-triage-ui"
 
 
 @dataclass(frozen=True)
@@ -30,10 +33,10 @@ class CapturingHttp:
         self.exchanges.append({
             "url": url,
             "request": {
-                "payload": copy.deepcopy(payload),
+                "payload": redact_data(copy.deepcopy(payload)),
                 "headers": _redact_headers(headers),
             },
-            "response": copy.deepcopy(response),
+            "response": redact_data(copy.deepcopy(response)),
         })
         return response
 
@@ -45,7 +48,7 @@ def list_artifact_files(root: Path) -> list[Path]:
     files = [
         path.relative_to(root)
         for path in root.rglob("*")
-        if path.is_file() and path.name != MANIFEST_NAME
+        if path.is_file() and not _is_internal_path(path.relative_to(root))
     ]
     return sorted(files, key=lambda path: path.as_posix())
 
@@ -64,7 +67,7 @@ def read_text_preview(path: Path, *, max_bytes: int = 250_000) -> TextPreview:
     if b"\x00" in data[: min(len(data), max_bytes)]:
         return TextPreview(text="", truncated=False, binary=True)
     truncated = len(data) > max_bytes
-    text = data[:max_bytes].decode("utf-8", errors="replace")
+    text = redact_text(data[:max_bytes].decode("utf-8", errors="replace"))
     return TextPreview(text=text, truncated=truncated, binary=False)
 
 
@@ -83,6 +86,14 @@ def render_line_preview(text: str, highlighted_lines: set[int]) -> str:
 
 def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
     return {
-        key: "<redacted>" if key.lower() == "authorization" else value
+        key: "<redacted>" if key.lower() == "authorization" else redact_text(value)
         for key, value in headers.items()
     }
+
+
+def _is_internal_path(path: Path) -> bool:
+    return (
+        path.name == MANIFEST_NAME
+        or STORE_DIR_NAME in path.parts
+        or SESSION_DIR_NAME in path.parts
+    )

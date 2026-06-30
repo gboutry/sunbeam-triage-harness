@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .probes import ProbeResult, run_preflight_probes
+from .redaction import redact_text
 
 CLEANUP_STEP_NAMES = {
     "Collect logs",
@@ -29,11 +30,6 @@ ERROR_PATTERNS = re.compile(
 NOISE_PATTERNS = re.compile(
     r"Failed to collect files|validation\*\.log|Juju command \"machines\" not supported",
     re.IGNORECASE,
-)
-
-SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET|API_KEY|ACCESS_KEY)[A-Z0-9_]*)"
-    r"\s*=\s*([^\s'\";]+)"
 )
 
 
@@ -232,7 +228,8 @@ class EvidenceCollector:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         for number, line in enumerate(lines, start=1):
             if (
-                not ERROR_PATTERNS.search(line) and not SECRET_ASSIGNMENT.search(line)
+                not ERROR_PATTERNS.search(line)
+                and not _contains_redactable_secret(line)
             ) or NOISE_PATTERNS.search(line):
                 continue
             items.append(
@@ -240,7 +237,7 @@ class EvidenceCollector:
                     kind=kind,
                     path=rel,
                     line=number,
-                    excerpt=_redact(line.strip())[:1000],
+                    excerpt=redact_text(line.strip())[:1000],
                 )
             )
         return items
@@ -265,14 +262,14 @@ class EvidenceCollector:
                         kind=kind,
                         path=rel,
                         line=number,
-                        excerpt=_redact(stripped)[:1000],
+                        excerpt=redact_text(stripped)[:1000],
                     )
                 )
         return items[:30]
 
 
-def _redact(text: str) -> str:
-    return SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", text)
+def _contains_redactable_secret(text: str) -> bool:
+    return redact_text(text) != text
 
 
 def _probe_prompt_lines(probe_results: tuple[ProbeResult, ...]) -> list[str]:

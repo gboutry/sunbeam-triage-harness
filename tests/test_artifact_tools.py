@@ -37,6 +37,8 @@ def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):
     (root / ".sunbeam-triage-manifest.json").write_text("[]", encoding="utf-8")
     (root / ".sunbeam-triage-ui/sessions").mkdir(parents=True)
     (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text("{}", encoding="utf-8")
+    (root / ".sunbeam-triage/sessions").mkdir(parents=True)
+    (root / ".sunbeam-triage/sessions/uuid.json").write_text("{}", encoding="utf-8")
 
     result = execute_artifact_tool(root, "list_artifact_files", {})
 
@@ -92,6 +94,25 @@ def test_get_artifact_file_reads_line_window(tmp_path):
     assert result["line_count"] == 2
 
 
+def test_artifact_file_redacts_secret_values(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "failed\nOS_PASSWORD=super-secret-value\n",
+        encoding="utf-8",
+    )
+
+    result = execute_artifact_tool(
+        root,
+        "get_artifact_file",
+        {"path": "generated/sunbeam/output.log"},
+    )
+
+    assert "super-secret-value" not in result["content"]
+    assert "OS_PASSWORD=<redacted>" in result["content"]
+
+
 def test_get_artifact_file_rejects_paths_outside_artifact_root(tmp_path):
     result = execute_artifact_tool(
         tmp_path / "uuid",
@@ -144,6 +165,11 @@ def test_search_artifacts_returns_bounded_matches_and_skips_archives(tmp_path):
         "ERROR internal",
         encoding="utf-8",
     )
+    (root / ".sunbeam-triage/sessions").mkdir(parents=True)
+    (root / ".sunbeam-triage/sessions/uuid.json").write_text(
+        "ERROR internal v2",
+        encoding="utf-8",
+    )
 
     result = execute_artifact_tool(
         root,
@@ -188,6 +214,22 @@ def test_search_artifacts_bounds_long_line_excerpts(tmp_path):
 
     assert len(result["matches"][0]["excerpt"]) == 500
     assert result["matches"][0]["excerpt"].endswith("...")
+
+
+def test_search_artifacts_redacts_secret_values(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text("ERROR token=AbcdEFGH1234567890abcdEFGH1234567890\n", encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "search_artifacts",
+        {"pattern": "ERROR"},
+    )
+
+    assert "AbcdEFGH1234567890" not in result["matches"][0]["excerpt"]
+    assert "token=<redacted>" in result["matches"][0]["excerpt"]
 
 
 def test_list_sosreports_returns_archives_with_host_without_scanning_members(tmp_path):
@@ -318,6 +360,41 @@ def test_get_sosreport_file_reads_bounded_member_line_window(tmp_path):
         "line_start": 2,
         "line_count": 2,
     }
+
+
+def test_sosreport_search_and_read_redact_secret_values(tmp_path):
+    root = tmp_path / "uuid"
+    archive = root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"
+    _write_sosreport(
+        archive,
+        {
+            "sosreport-node-a-2026-06-23-abc/var/log/syslog": (
+                "ERROR Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+            ),
+        },
+    )
+
+    search = execute_artifact_tool(
+        root,
+        "search_sosreport",
+        {
+            "archive_path": "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz",
+            "pattern": "ERROR",
+        },
+    )
+    read = execute_artifact_tool(
+        root,
+        "get_sosreport_file",
+        {
+            "archive_path": "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz",
+            "member_path": "var/log/syslog",
+        },
+    )
+
+    assert "sk-or-v1-aaaaaaaa" not in search["matches"][0]["excerpt"]
+    assert "Authorization: Bearer <redacted>" in search["matches"][0]["excerpt"]
+    assert "sk-or-v1-aaaaaaaa" not in read["content"]
+    assert "Authorization: Bearer <redacted>" in read["content"]
 
 
 def test_get_sosreport_file_rejects_unsafe_member_path(tmp_path):

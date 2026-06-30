@@ -4,6 +4,7 @@ from html import escape
 
 from .evidence import EvidencePack
 from .llm import DiagnosisReport
+from .redaction import redact_text
 
 
 def render_html(pack: EvidencePack, report: DiagnosisReport) -> str:
@@ -13,16 +14,16 @@ def render_html(pack: EvidencePack, report: DiagnosisReport) -> str:
         "<head>",
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
-        f"<title>Diagnostics: {escape(pack.uuid)}</title>",
+        f"<title>Diagnostics: {_safe(pack.uuid)}</title>",
         "<style>",
         CSS,
         "</style>",
         "</head>",
         "<body>",
-        f"<h1>Diagnostics: {escape(pack.uuid)}</h1>",
+        f"<h1>Diagnostics: {_safe(pack.uuid)}</h1>",
         _summary(pack, report),
-        _section("Failure Surface", f"<p>{escape(report.failure_surface)}</p>"),
-        _section("Root Cause", f"<p>{escape(report.root_cause)}</p>"),
+        _section("Failure Surface", f"<p>{_safe(report.failure_surface)}</p>"),
+        _section("Root Cause", f"<p>{_safe(report.root_cause)}</p>"),
         _report_evidence(report),
         _failure_timeline(report),
         _cascading_errors(report),
@@ -41,15 +42,15 @@ def _summary(pack: EvidencePack, report: DiagnosisReport) -> str:
     return f"""
 <section class="summary">
   <h2>Summary</h2>
-  <p>{escape(report.summary)}</p>
+  <p>{_safe(report.summary)}</p>
   <dl>
-    <dt>Run ID</dt><dd>{escape(str(pack.run.run_id))}</dd>
-    <dt>Branch</dt><dd>{escape(pack.run.branch)}</dd>
-    <dt>Workflow</dt><dd>{escape(pack.run.workflow)}</dd>
-    <dt>Failed Step</dt><dd>{escape(pack.failed_step.name)}</dd>
-    <dt>Confidence</dt><dd>{escape(report.confidence)}</dd>
-    <dt>Triage Confidence</dt><dd>{escape(report.triage_confidence)}</dd>
-    <dt>Stop Reason</dt><dd>{escape(report.stop_reason or "not reported")}</dd>
+    <dt>Run ID</dt><dd>{_safe(str(pack.run.run_id))}</dd>
+    <dt>Branch</dt><dd>{_safe(pack.run.branch)}</dd>
+    <dt>Workflow</dt><dd>{_safe(pack.run.workflow)}</dd>
+    <dt>Failed Step</dt><dd>{_safe(pack.failed_step.name)}</dd>
+    <dt>Confidence</dt><dd>{_safe(report.confidence)}</dd>
+    <dt>Triage Confidence</dt><dd>{_safe(report.triage_confidence)}</dd>
+    <dt>Stop Reason</dt><dd>{_safe(report.stop_reason or "not reported")}</dd>
   </dl>
 </section>
 """.strip()
@@ -59,14 +60,18 @@ def _section(title: str, body: str) -> str:
     return f"<section><h2>{escape(title)}</h2>{body}</section>"
 
 
+def _safe(value: str) -> str:
+    return escape(redact_text(str(value)))
+
+
 def _report_evidence(report: DiagnosisReport) -> str:
     rows = []
     for item in report.evidence:
         line = "" if item.line is None else f":{item.line}"
         rows.append(
             "<tr>"
-            f"<td>{escape(item.path + line)}</td>"
-            f"<td><code>{escape(item.excerpt)}</code></td>"
+            f"<td>{_safe(item.path + line)}</td>"
+            f"<td><code>{_safe(item.excerpt)}</code></td>"
             "</tr>"
         )
     body = "<p>No evidence items returned by model.</p>"
@@ -84,9 +89,9 @@ def _candidate_mechanisms(report: DiagnosisReport) -> str:
         )
     rows = [
         "<tr>"
-        f"<td>{escape(item.name)}</td>"
-        f"<td>{escape(item.status)}</td>"
-        f"<td>{escape(item.rationale)}</td>"
+        f"<td>{_safe(item.name)}</td>"
+        f"<td>{_safe(item.status)}</td>"
+        f"<td>{_safe(item.rationale)}</td>"
         "</tr>"
         for item in report.candidate_mechanisms
     ]
@@ -102,10 +107,10 @@ def _failure_timeline(report: DiagnosisReport) -> str:
         return _section("Failure Timeline", "<p>No timeline returned.</p>")
     rows = [
         "<tr>"
-        f"<td>{escape(item.timestamp)}</td>"
-        f"<td>{escape(item.source)}</td>"
-        f"<td>{escape(item.location)}</td>"
-        f"<td>{escape(item.event)}</td>"
+        f"<td>{_safe(item.timestamp)}</td>"
+        f"<td>{_safe(item.source)}</td>"
+        f"<td>{_safe(item.location)}</td>"
+        f"<td>{_safe(item.event)}</td>"
         "</tr>"
         for item in report.failure_timeline
     ]
@@ -125,8 +130,8 @@ def _cascading_errors(report: DiagnosisReport) -> str:
         line = "" if item.line is None else f":{item.line}"
         rows.append(
             "<tr>"
-            f"<td>{escape(item.path + line)}</td>"
-            f"<td><code>{escape(item.excerpt)}</code></td>"
+            f"<td>{_safe(item.path + line)}</td>"
+            f"<td><code>{_safe(item.excerpt)}</code></td>"
             "</tr>"
         )
     return _section(
@@ -141,9 +146,9 @@ def _alternatives_considered(report: DiagnosisReport) -> str:
         return _section("Alternatives Considered", "<p>No alternatives returned.</p>")
     rows = [
         "<tr>"
-        f"<td>{escape(item.hypothesis)}</td>"
-        f"<td>{escape(item.status)}</td>"
-        f"<td>{escape(item.reason)}</td>"
+        f"<td>{_safe(item.hypothesis)}</td>"
+        f"<td>{_safe(item.status)}</td>"
+        f"<td>{_safe(item.reason)}</td>"
         "</tr>"
         for item in report.alternatives_considered
     ]
@@ -159,7 +164,7 @@ def _list_section(title: str, values: list[str]) -> str:
         return _section(title, "<p>None reported.</p>")
     return _section(
         title,
-        "<ul>" + "".join(f"<li>{escape(value)}</li>" for value in values) + "</ul>",
+        "<ul>" + "".join(f"<li>{_safe(value)}</li>" for value in values) + "</ul>",
     )
 
 
@@ -169,9 +174,9 @@ def _harness_evidence(pack: EvidencePack) -> str:
         line = "" if item.line is None else f":{item.line}"
         rows.append(
             "<tr>"
-            f"<td>{escape(item.kind)}</td>"
-            f"<td>{escape(item.path + line)}</td>"
-            f"<td><code>{escape(item.excerpt)}</code></td>"
+            f"<td>{_safe(item.kind)}</td>"
+            f"<td>{_safe(item.path + line)}</td>"
+            f"<td><code>{_safe(item.excerpt)}</code></td>"
             "</tr>"
         )
     body = "<table><thead><tr><th>Kind</th><th>Source</th><th>Excerpt</th></tr></thead>"
