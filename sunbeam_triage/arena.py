@@ -9,6 +9,7 @@ from typing import Any, Callable
 from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
 from .llm import OpenRouterClient
+from .progress import ProgressEvent, ProgressSink, emit_progress
 from .sessions import append_session_event, save_session_snapshot
 from .tool_activity import analyze_tool_activity
 from .triage_state import BudgetProfile, TriageLoopOptions, resolve_triage_budget
@@ -31,7 +32,13 @@ class ArenaRunner:
         self.config = config
         self.client_factory = client_factory or OpenRouterClient
 
-    def run(self, uuid: str, options: ArenaOptions) -> dict[str, Any]:
+    def run(
+        self,
+        uuid: str,
+        options: ArenaOptions,
+        *,
+        progress: ProgressSink | None = None,
+    ) -> dict[str, Any]:
         models = _normalize_models(options.models)
         if len(models) < 2:
             raise ValueError("Arena runs require at least two models.")
@@ -61,6 +68,16 @@ class ArenaRunner:
             "contenders": [],
         }
         save_session_snapshot(self.config.paths.artifact_root, session)
+        emit_progress(
+            progress,
+            ProgressEvent(
+                run_id=session_id,
+                run_type="arena",
+                phase="arena_started",
+                status="running",
+                message=f"Arena started with {len(models)} contenders",
+            ),
+        )
         append_session_event(
             self.config.paths.artifact_root,
             session_id,
@@ -79,6 +96,17 @@ class ArenaRunner:
                     "model": model,
                 },
             )
+            emit_progress(
+                progress,
+                ProgressEvent(
+                    run_id=session_id,
+                    run_type="arena",
+                    phase="contender_started",
+                    status="running",
+                    message=f"Contender {contender_id} started",
+                    contender_id=contender_id,
+                ),
+            )
             contender = self._run_contender(
                 model,
                 contender_id,
@@ -86,8 +114,29 @@ class ArenaRunner:
                 session_id=session_id,
                 artifact_root=artifact_root,
                 triage_options=triage_options,
+                progress=progress,
             )
             session["contenders"].append(contender)
+            emit_progress(
+                progress,
+                ProgressEvent(
+                    run_id=session_id,
+                    run_type="arena",
+                    phase=(
+                        "contender_completed"
+                        if contender["status"] == "completed"
+                        else "contender_failed"
+                    ),
+                    status=contender["status"],
+                    message=(
+                        f"Contender {contender_id} completed"
+                        if contender["status"] == "completed"
+                        else f"Contender {contender_id} failed"
+                    ),
+                    contender_id=contender_id,
+                    warning=contender.get("error"),
+                ),
+            )
             append_session_event(
                 self.config.paths.artifact_root,
                 session_id,
@@ -123,6 +172,16 @@ class ArenaRunner:
         session["output"] = str(output)
         session["updated_at"] = _now()
         save_session_snapshot(self.config.paths.artifact_root, session)
+        emit_progress(
+            progress,
+            ProgressEvent(
+                run_id=session_id,
+                run_type="arena",
+                phase="arena_completed",
+                status=session["status"],
+                message=session["summary"],
+            ),
+        )
         append_session_event(
             self.config.paths.artifact_root,
             session_id,
@@ -135,6 +194,110 @@ class ArenaRunner:
         )
         return session
 
+    def retry_failed(
+        self,
+        session: dict[str, Any],
+        options: ArenaOptions,
+        *,
+        progress: ProgressSink | None = None,
+    ) -> dict[str, Any]:
+        uuid = str(session["uuid"])
+        artifact_root = self.config.paths.artifact_root / uuid
+        pack = EvidenceCollector(artifact_root, uuid).collect()
+        evidence_text = pack.to_prompt_text()
+        triage_options = options.triage_options or _resolve_triage_options(
+            self.config,
+            options,
+        )
+        updated = dict(session)
+        updated["contenders"] = [dict(item) for item in session.get("contenders", [])]
+        session_id = str(updated["session_id"])
+        for index, contender in enumerate(updated["contenders"]):
+            if contender.get("status") != "failed":
+                continue
+            contender_id = str(contender["contender_id"])
+            model = str(contender["model"])
+            emit_progress(
+                progress,
+                ProgressEvent(
+                    run_id=session_id,
+                    run_type="arena",
+                    phase="contender_started",
+                    status="running",
+                    message=f"Contender {contender_id} started",
+                    contender_id=contender_id,
+                ),
+            )
+            replacement = self._run_contender(
+                model,
+                contender_id,
+                evidence_text=evidence_text,
+                session_id=session_id,
+                artifact_root=artifact_root,
+                triage_options=triage_options,
+                progress=progress,
+            )
+            updated["contenders"][index] = replacement
+            emit_progress(
+                progress,
+                ProgressEvent(
+                    run_id=session_id,
+                    run_type="arena",
+                    phase=(
+                        "contender_completed"
+                        if replacement["status"] == "completed"
+                        else "contender_failed"
+                    ),
+                    status=replacement["status"],
+                    message=(
+                        f"Contender {contender_id} completed"
+                        if replacement["status"] == "completed"
+                        else f"Contender {contender_id} failed"
+                    ),
+                    contender_id=contender_id,
+                    warning=replacement.get("error"),
+                ),
+            )
+        completed = [
+            item for item in updated["contenders"] if item.get("status") == "completed"
+        ]
+        updated["status"] = (
+            "completed"
+            if len(completed) == len(updated["contenders"])
+            else "completed_with_errors"
+            if completed
+            else "failed"
+        )
+        updated["summary"] = _arena_summary(updated)
+        output = Path(
+            updated.get("output") or _arena_output_path(uuid, session_id)
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(render_arena_html(updated), encoding="utf-8")
+        updated["output"] = str(output)
+        updated["updated_at"] = _now()
+        save_session_snapshot(self.config.paths.artifact_root, updated)
+        append_session_event(
+            self.config.paths.artifact_root,
+            session_id,
+            {
+                "event": "arena_retry_completed",
+                "created_at": updated["updated_at"],
+                "status": updated["status"],
+            },
+        )
+        emit_progress(
+            progress,
+            ProgressEvent(
+                run_id=session_id,
+                run_type="arena",
+                phase="arena_completed",
+                status=updated["status"],
+                message=updated["summary"],
+            ),
+        )
+        return updated
+
     def _run_contender(
         self,
         model: str,
@@ -144,6 +307,7 @@ class ArenaRunner:
         session_id: str,
         artifact_root: Path,
         triage_options: TriageLoopOptions,
+        progress: ProgressSink | None = None,
     ) -> dict[str, Any]:
         llm_config = _llm_config_for_model(self.config.llm, model)
         client = self.client_factory(llm_config)
@@ -154,6 +318,17 @@ class ArenaRunner:
             "started_at": _now(),
         }
         try:
+            emit_progress(
+                progress,
+                ProgressEvent(
+                    run_id=session_id,
+                    run_type="arena",
+                    phase="model_request",
+                    status="running",
+                    message=f"Contender {contender_id} request sent",
+                    contender_id=contender_id,
+                ),
+            )
             report = client.diagnose(
                 evidence_text,
                 session_id=contender_session_id,
@@ -161,6 +336,9 @@ class ArenaRunner:
                 max_tool_rounds=triage_options.max_rounds,
                 max_tool_result_chars=triage_options.max_tool_result_chars,
                 triage_options=triage_options,
+                progress=_arena_progress_proxy(progress),
+                run_type="arena",
+                contender_id=contender_id,
             )
         except Exception as exc:
             return {
@@ -170,6 +348,17 @@ class ArenaRunner:
                 "error": str(exc),
                 "exchanges": list(getattr(client, "exchanges", [])),
             }
+        emit_progress(
+            progress,
+            ProgressEvent(
+                run_id=session_id,
+                run_type="arena",
+                phase="completed",
+                status="completed",
+                message=f"Contender {contender_id} response complete",
+                contender_id=contender_id,
+            ),
+        )
         contender = {
             **base,
             "status": "completed",
@@ -296,6 +485,17 @@ def _arena_summary(session: dict[str, Any]) -> str:
         1 for contender in session["contenders"] if contender.get("status") == "completed"
     )
     return f"{completed}/{len(session['contenders'])} contenders completed"
+
+
+def _arena_progress_proxy(progress: ProgressSink | None) -> ProgressSink | None:
+    if progress is None:
+        return None
+
+    def proxy(event: ProgressEvent) -> None:
+        if event.phase not in {"model_request", "completed"}:
+            progress(event)
+
+    return proxy
 
 
 def _now() -> str:

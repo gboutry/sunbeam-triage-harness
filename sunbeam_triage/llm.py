@@ -9,6 +9,12 @@ from openrouter import OpenRouter
 
 from .artifact_tools import artifact_tool_definitions, execute_artifact_tool
 from .config import LlmConfig
+from .progress import (
+    ProgressEvent,
+    ProgressSink,
+    emit_progress,
+    event_from_tool_call,
+)
 from .triage_state import (
     BudgetProfile,
     InvestigationState,
@@ -277,6 +283,9 @@ class OpenRouterClient:
         max_tool_rounds: int | None = None,
         max_tool_result_chars: int = 60_000,
         triage_options: TriageLoopOptions | None = None,
+        progress: ProgressSink | None = None,
+        run_type: str = "diagnosis",
+        contender_id: str | None = None,
     ) -> DiagnosisReport:
         request = {
             "model": self.config.model,
@@ -317,6 +326,10 @@ class OpenRouterClient:
             max_tool_rounds=max_tool_rounds,
             max_tool_result_chars=max_tool_result_chars,
             triage_options=triage_options,
+            progress=progress,
+            run_id=session_id or self.config.model,
+            run_type=run_type,
+            contender_id=contender_id,
         )
         data = _response_json(response)
         has_tool_budget_fallback = _exchange_range_has_tool_budget_fallback(
@@ -347,6 +360,10 @@ class OpenRouterClient:
                 max_tool_result_chars=max_tool_result_chars,
                 triage_options=triage_options,
                 tool_choice="required",
+                progress=progress,
+                run_id=session_id or self.config.model,
+                run_type=run_type,
+                contender_id=contender_id,
             )
             data = _response_json(response)
             if _exchange_range_has_tool_budget_fallback(
@@ -386,6 +403,9 @@ class OpenRouterClient:
         max_tool_rounds: int | None = None,
         max_tool_result_chars: int = 60_000,
         triage_options: TriageLoopOptions | None = None,
+        progress: ProgressSink | None = None,
+        run_type: str = "followup",
+        contender_id: str | None = None,
     ) -> str:
         request = {
             "model": self.config.model,
@@ -422,6 +442,10 @@ class OpenRouterClient:
             max_tool_rounds=max_tool_rounds,
             max_tool_result_chars=max_tool_result_chars,
             triage_options=triage_options,
+            progress=progress,
+            run_id=session_id or self.config.model,
+            run_type=run_type,
+            contender_id=contender_id,
         )
         return _response_content(response)
 
@@ -434,10 +458,28 @@ class OpenRouterClient:
         max_tool_result_chars: int,
         triage_options: TriageLoopOptions | None = None,
         tool_choice: str = "auto",
+        progress: ProgressSink | None = None,
+        run_id: str = "",
+        run_type: str = "diagnosis",
+        contender_id: str | None = None,
     ):
         if artifact_root is None:
+            _emit_model_request(
+                progress,
+                run_id=run_id,
+                run_type=run_type,
+                contender_id=contender_id,
+                round_number=None,
+            )
             response = self._send(request)
             self._record_exchange(request, response)
+            _emit_completed(
+                progress,
+                response,
+                run_id=run_id,
+                run_type=run_type,
+                contender_id=contender_id,
+            )
             return response
 
         options = triage_options or resolve_triage_budget(
@@ -451,17 +493,59 @@ class OpenRouterClient:
             "tool_choice": tool_choice,
             "parallel_tool_calls": False,
         }
-        for _ in range(options.max_rounds):
+        for round_number in range(1, options.max_rounds + 1):
+            _emit_model_request(
+                progress,
+                run_id=run_id,
+                run_type=run_type,
+                contender_id=contender_id,
+                round_number=round_number,
+            )
             response = self._send(request)
             self._record_exchange(request, response)
             tool_calls = _tool_calls(response)
             if not tool_calls:
+                _emit_completed(
+                    progress,
+                    response,
+                    run_id=run_id,
+                    run_type=run_type,
+                    contender_id=contender_id,
+                )
                 return response
+            for tool_call in tool_calls:
+                emit_progress(
+                    progress,
+                    event_from_tool_call(
+                        _tool_call_dict(tool_call),
+                        run_id=run_id,
+                        run_type=run_type,
+                        contender_id=contender_id,
+                        round_number=round_number,
+                    ),
+                )
             tool_result_messages = _tool_result_messages(
                 artifact_root,
                 tool_calls,
                 max_chars=options.max_tool_result_chars,
             )
+            for tool_call, message in zip(tool_calls, tool_result_messages, strict=False):
+                name, arguments = _tool_call_name_and_arguments(tool_call)
+                emit_progress(
+                    progress,
+                    ProgressEvent(
+                        run_id=run_id,
+                        run_type=run_type,
+                        phase="tool_result",
+                        status="running",
+                        message=f"Tool returned {name}",
+                        contender_id=contender_id,
+                        round_number=round_number,
+                        tool_name=name,
+                        target=_progress_tool_target(arguments),
+                        result_chars=len(str(message.get("content", ""))),
+                    ),
+                )
             state.record_round()
             for tool_call, message in zip(tool_calls, tool_result_messages, strict=False):
                 name, arguments = _tool_call_name_and_arguments(tool_call)
@@ -478,16 +562,69 @@ class OpenRouterClient:
             request["messages"].append(_investigation_state_message(state))
             if state.should_finalize():
                 final_request = _final_request_with_state(request, state)
+                emit_progress(
+                    progress,
+                    ProgressEvent(
+                        run_id=run_id,
+                        run_type=run_type,
+                        phase="finalizing",
+                        status="running",
+                        message=f"Finalizing after {state.stop_reason}",
+                        contender_id=contender_id,
+                        round_number=round_number,
+                    ),
+                )
+                _emit_model_request(
+                    progress,
+                    run_id=run_id,
+                    run_type=run_type,
+                    contender_id=contender_id,
+                    round_number=round_number + 1,
+                )
                 response = self._send(final_request)
                 self._record_exchange(final_request, response)
+                _emit_completed(
+                    progress,
+                    response,
+                    run_id=run_id,
+                    run_type=run_type,
+                    contender_id=contender_id,
+                )
                 return response
 
         if not state.stop_reason:
             state.stop_reason = "budget_exhausted"
             state.phase = "finalisation"
         final_request = _final_request_with_state(request, state)
+        emit_progress(
+            progress,
+            ProgressEvent(
+                run_id=run_id,
+                run_type=run_type,
+                phase="finalizing",
+                status="running",
+                message=f"Finalizing after {state.stop_reason}",
+                contender_id=contender_id,
+                round_number=options.max_rounds,
+                warning=state.stop_reason,
+            ),
+        )
+        _emit_model_request(
+            progress,
+            run_id=run_id,
+            run_type=run_type,
+            contender_id=contender_id,
+            round_number=options.max_rounds + 1,
+        )
         response = self._send(final_request)
         self._record_exchange(final_request, response)
+        _emit_completed(
+            progress,
+            response,
+            run_id=run_id,
+            run_type=run_type,
+            contender_id=contender_id,
+        )
         return response
 
     def _send(self, request: dict[str, Any]):
@@ -543,6 +680,67 @@ def _cache_kwargs(model: str) -> dict[str, Any]:
     if model.startswith("anthropic/"):
         return {"cache_control": {"type": "ephemeral"}}
     return {}
+
+
+def _emit_model_request(
+    progress: ProgressSink | None,
+    *,
+    run_id: str,
+    run_type: str,
+    contender_id: str | None,
+    round_number: int | None,
+) -> None:
+    subject = f"Contender {contender_id}" if contender_id else "Model"
+    emit_progress(
+        progress,
+        ProgressEvent(
+            run_id=run_id,
+            run_type=run_type,
+            phase="model_request",
+            status="running",
+            message=f"{subject} request sent",
+            contender_id=contender_id,
+            round_number=round_number,
+        ),
+    )
+
+
+def _emit_completed(
+    progress: ProgressSink | None,
+    response: Any,
+    *,
+    run_id: str,
+    run_type: str,
+    contender_id: str | None,
+) -> None:
+    usage = _usage_dict(getattr(response, "usage", None))
+    subject = f"Contender {contender_id}" if contender_id else "Model"
+    emit_progress(
+        progress,
+        ProgressEvent(
+            run_id=run_id,
+            run_type=run_type,
+            phase="completed",
+            status="completed",
+            message=f"{subject} response complete",
+            contender_id=contender_id,
+            total_tokens=int(usage.get("total_tokens") or 0),
+            total_cost=_coerce_float(usage.get("cost")),
+        ),
+    )
+
+
+def _progress_tool_target(arguments: dict[str, Any]) -> str:
+    if arguments.get("archive_path") and arguments.get("member_path"):
+        return f"{arguments['archive_path']}::{arguments['member_path']}"
+    return str(
+        arguments.get("path")
+        or arguments.get("member_path")
+        or arguments.get("archive_path")
+        or arguments.get("path_prefix")
+        or arguments.get("pattern")
+        or ""
+    )
 
 
 def _response_content(response: Any) -> str:
@@ -920,6 +1118,13 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         if hasattr(usage, name):
             data[name] = _json_safe(getattr(usage, name))
     return data
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _json_safe(value: Any) -> Any:

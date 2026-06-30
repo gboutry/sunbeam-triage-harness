@@ -7,10 +7,11 @@ from typing import Any
 
 import streamlit as st
 
-from sunbeam_triage.config import Config
 from sunbeam_triage.arena import ArenaOptions, ArenaRunner
+from sunbeam_triage.config import Config
 from sunbeam_triage.evidence import EvidenceCollector
 from sunbeam_triage.llm import DiagnosisReport, OpenRouterClient
+from sunbeam_triage.progress import ProgressEvent, ProgressSink, summarize_progress_events
 from sunbeam_triage.render import render_html
 from sunbeam_triage.sessions import (
     append_session_event,
@@ -69,6 +70,9 @@ def main() -> None:
 
     selected_uuid = _sidebar(config)
     session = _load_active_session(config, selected_uuid)
+    if st.session_state.get("pending_run"):
+        _execute_pending_run(config, st.session_state["pending_run"], session)
+        return
 
     left, right = st.columns([1.15, 0.85], gap="large")
     with left:
@@ -81,6 +85,8 @@ def _initialize_state(config: Config) -> None:
     st.session_state.setdefault("selected_uuid", "")
     st.session_state.setdefault("selected_arena_id", "")
     st.session_state.setdefault("pending_attachments", [])
+    st.session_state.setdefault("pending_run", None)
+    st.session_state.setdefault("active_progress_events", [])
     if not st.session_state["selected_uuid"]:
         sessions = list_saved_sessions(config.paths.artifact_root)
         if sessions:
@@ -101,12 +107,13 @@ def _sidebar(config: Config) -> str:
             )
             submitted = st.form_submit_button("Start diagnosis", type="primary")
         if submitted:
-            _start_diagnosis(
-                config,
-                uuid.strip(),
-                model.strip() or config.llm.model,
-                budget,
-            )
+            st.session_state["pending_run"] = {
+                "type": "diagnosis",
+                "uuid": uuid.strip(),
+                "model": model.strip() or config.llm.model,
+                "budget": budget,
+            }
+            st.rerun()
 
         with st.expander("Arena"):
             with st.form("start-arena", clear_on_submit=False):
@@ -122,12 +129,17 @@ def _sidebar(config: Config) -> str:
                 )
                 arena_submitted = st.form_submit_button("Start arena")
             if arena_submitted:
-                _start_arena(
-                    config,
-                    arena_uuid.strip(),
-                    [item.strip() for item in arena_models.split(",") if item.strip()],
-                    arena_budget,
-                )
+                st.session_state["pending_run"] = {
+                    "type": "arena",
+                    "uuid": arena_uuid.strip(),
+                    "models": [
+                        item.strip()
+                        for item in arena_models.split(",")
+                        if item.strip()
+                    ],
+                    "budget": arena_budget,
+                }
+                st.rerun()
 
         st.divider()
         query = st.text_input("Search history")
@@ -148,33 +160,169 @@ def _sidebar(config: Config) -> str:
     return st.session_state.get("selected_uuid", "")
 
 
-def _start_arena(config: Config, uuid: str, models: list[str], budget: str) -> None:
+def _execute_pending_run(
+    config: Config,
+    pending: dict[str, Any],
+    session: dict[str, Any] | None,
+) -> None:
+    st.title("Sunbeam Triage")
+    events: list[dict[str, Any]] = []
+    st.session_state["active_progress_events"] = events
+    progress_area = st.empty()
+
+    def progress(event: ProgressEvent) -> None:
+        _append_progress_event(events, event)
+        with progress_area.container():
+            _render_progress_console(events, title=_pending_run_title(pending))
+
+    with progress_area.container():
+        _render_progress_console(events, title=_pending_run_title(pending))
+    try:
+        if pending.get("type") == "diagnosis":
+            _start_diagnosis(
+                config,
+                str(pending.get("uuid", "")),
+                str(pending.get("model", config.llm.model)),
+                str(pending.get("budget", "default")),
+                progress=progress,
+                progress_events=events,
+            )
+        elif pending.get("type") == "arena":
+            _start_arena(
+                config,
+                str(pending.get("uuid", "")),
+                [str(item) for item in pending.get("models", [])],
+                str(pending.get("budget", "default")),
+                progress=progress,
+                progress_events=events,
+            )
+        elif pending.get("type") == "arena_retry":
+            _retry_failed_arena(
+                config,
+                str(pending.get("session_id", "")),
+                progress=progress,
+                progress_events=events,
+            )
+        elif pending.get("type") == "followup" and session:
+            _send_followup(
+                config,
+                session,
+                str(pending.get("prompt", "")),
+                progress=progress,
+                progress_events=events,
+            )
+        else:
+            st.error("Unknown pending run.")
+            return
+    finally:
+        st.session_state["pending_run"] = None
+    st.rerun()
+
+
+def _pending_run_title(pending: dict[str, Any]) -> str:
+    run_type = str(pending.get("type", "run"))
+    uuid = str(pending.get("uuid", ""))
+    if run_type == "followup":
+        return "Follow-up in progress"
+    return f"{run_type.title()} in progress: {uuid}"
+
+
+def _start_arena(
+    config: Config,
+    uuid: str,
+    models: list[str],
+    budget: str,
+    *,
+    progress: ProgressSink | None = None,
+    progress_events: list[dict[str, Any]] | None = None,
+) -> None:
     if not uuid:
         st.sidebar.error("Enter a Solutions Run UUID.")
         return
     if len(models) < 2:
         st.sidebar.error("Enter at least two contender models.")
         return
-    with st.status(f"Running arena {uuid}", expanded=True) as status:
-        try:
-            st.write("Downloading artifacts")
-            SwiftMirror(config.swift, config.paths.artifact_root).mirror_uuid(
-                uuid,
-                continue_on_error=True,
-            )
-            st.write(f"Running {len(models)} contenders")
-            session = ArenaRunner(config).run(
-                uuid,
-                ArenaOptions(models=models, budget=budget),
-            )
-            st.session_state["selected_arena_id"] = session["session_id"]
-            status.update(label="Arena complete", state="complete")
-        except Exception as exc:
-            status.update(label="Arena failed", state="error")
-            st.error(str(exc))
+    try:
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "arena",
+            "download",
+            "running",
+            "Downloading artifacts",
+        )
+        SwiftMirror(config.swift, config.paths.artifact_root).mirror_uuid(
+            uuid,
+            continue_on_error=True,
+        )
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "arena",
+            "arena_running",
+            "running",
+            f"Running {len(models)} contenders",
+        )
+        session = ArenaRunner(config).run(
+            uuid,
+            ArenaOptions(models=models, budget=budget),
+            progress=progress,
+        )
+        session["progress_events"] = list(progress_events or [])
+        save_session_snapshot(config.paths.artifact_root, session)
+        st.session_state["selected_arena_id"] = session["session_id"]
+    except Exception as exc:
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "arena",
+            "failed",
+            "failed",
+            str(exc),
+            warning=str(exc),
+        )
+        st.error(str(exc))
 
 
-def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None:
+def _retry_failed_arena(
+    config: Config,
+    session_id: str,
+    *,
+    progress: ProgressSink | None = None,
+    progress_events: list[dict[str, Any]] | None = None,
+) -> None:
+    loaded = load_session_record(config.paths.artifact_root, session_id)
+    if not loaded:
+        st.error("Arena record is missing.")
+        return
+    arena = loaded["snapshot"]
+    models = [str(item.get("model", "")) for item in arena.get("contenders", [])]
+    updated = ArenaRunner(config).retry_failed(
+        arena,
+        ArenaOptions(models=models, budget=str(arena.get("budget", "default"))),
+        progress=progress,
+    )
+    updated["progress_events"] = [
+        *[
+            event
+            for event in arena.get("progress_events", [])
+            if isinstance(event, dict)
+        ],
+        *list(progress_events or []),
+    ]
+    save_session_snapshot(config.paths.artifact_root, updated)
+    st.session_state["selected_arena_id"] = updated["session_id"]
+
+
+def _start_diagnosis(
+    config: Config,
+    uuid: str,
+    model: str,
+    budget: str,
+    *,
+    progress: ProgressSink | None = None,
+    progress_events: list[dict[str, Any]] | None = None,
+) -> None:
     if not uuid:
         st.sidebar.error("Enter a Solutions Run UUID.")
         return
@@ -194,101 +342,115 @@ def _start_diagnosis(config: Config, uuid: str, model: str, budget: str) -> None
     artifact_root = run_config.paths.artifact_root / uuid
     llm_client = OpenRouterClient(run_config.llm)
 
-    with st.status(f"Diagnosing {uuid}", expanded=True) as status:
-        download_failures: list[dict[str, Any]] = []
-        try:
-            st.write("Downloading artifacts")
-            progress_area = st.empty()
+    download_failures: list[dict[str, Any]] = []
+    try:
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "diagnosis",
+            "download",
+            "running",
+            "Downloading artifacts",
+        )
 
-            def show_download(event: dict[str, Any]) -> None:
-                error = ""
-                if event.get("error"):
-                    error = f"\n\nError: `{event['error']}`"
-                progress_area.write(
-                    (
-                        f"{event['status']} {event['index']}/{event['total']}: "
-                        f"`{event['name']}`\n\n"
-                        f"Destination: `{event['path']}`\n\n"
-                        f"URL: `{event['url']}`"
-                        f"{error}"
-                    )
-                )
-
-            manifest = SwiftMirror(run_config.swift, run_config.paths.artifact_root).mirror_uuid(
+        def show_download(event: dict[str, Any]) -> None:
+            _emit_ui_progress(
+                progress,
                 uuid,
-                progress=show_download,
-                continue_on_error=True,
-            )
-            st.write(f"Downloaded or reused {len(manifest.objects)} objects.")
-            if manifest.failures:
-                download_failures = [asdict(item) for item in manifest.failures]
-                st.warning(f"{len(manifest.failures)} Swift objects failed to download.")
-                st.dataframe(
-                    [
-                        {
-                            "object": failure.name,
-                            "path": failure.path,
-                            "url": failure.url,
-                            "error": failure.error,
-                        }
-                        for failure in manifest.failures
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            st.write("Collecting evidence")
-            pack = EvidenceCollector(artifact_root, uuid).collect()
-
-            st.write(f"Querying {run_config.llm.model}")
-            report = llm_client.diagnose(
-                pack.to_prompt_text(),
-                session_id=uuid,
-                artifact_root=artifact_root,
-                max_tool_rounds=triage_options.max_rounds,
-                max_tool_result_chars=triage_options.max_tool_result_chars,
-                triage_options=triage_options,
-            )
-
-            output = run_config.output_path(uuid)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(render_html(pack, report), encoding="utf-8")
-
-            _persist_diagnosis_session(
-                run_config.paths.artifact_root,
-                _session_from_diagnosis(
-                    uuid=uuid,
-                    model=run_config.llm.model,
-                    artifact_root=artifact_root,
-                    output=output,
-                    failed_step=pack.failed_step.name,
-                    report=report,
-                    exchanges=llm_client.exchanges,
-                    download_failures=download_failures,
+                "diagnosis",
+                "download",
+                "running",
+                (
+                    f"{event['status']} {event['index']}/{event['total']}: "
+                    f"{event['name']}"
                 ),
+                warning=str(event["error"]) if event.get("error") else None,
             )
-            st.session_state["selected_uuid"] = uuid
-            st.session_state["pending_attachments"] = []
-            status.update(label="Diagnosis complete", state="complete")
-        except Exception as exc:
-            status.update(label="Diagnosis failed", state="error")
-            _persist_diagnosis_session(
-                run_config.paths.artifact_root,
-                {
-                    "uuid": uuid,
-                    "model": run_config.llm.model,
-                    "summary": str(exc),
-                    "confidence": "error",
-                    "updated_at": _now(),
-                    "artifact_root": str(artifact_root),
-                    "error": str(exc),
-                    "chat": [],
-                    "exchanges": llm_client.exchanges,
-                    "download_failures": download_failures,
-                },
-            )
-            st.session_state["selected_uuid"] = uuid
-            st.error(str(exc))
+
+        manifest = SwiftMirror(run_config.swift, run_config.paths.artifact_root).mirror_uuid(
+            uuid,
+            progress=show_download,
+            continue_on_error=True,
+        )
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "diagnosis",
+            "download",
+            "completed",
+            f"Downloaded or reused {len(manifest.objects)} objects",
+        )
+        if manifest.failures:
+            download_failures = [asdict(item) for item in manifest.failures]
+
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "diagnosis",
+            "evidence",
+            "running",
+            "Collecting evidence",
+        )
+        pack = EvidenceCollector(artifact_root, uuid).collect()
+
+        report = llm_client.diagnose(
+            pack.to_prompt_text(),
+            session_id=uuid,
+            artifact_root=artifact_root,
+            max_tool_rounds=triage_options.max_rounds,
+            max_tool_result_chars=triage_options.max_tool_result_chars,
+            triage_options=triage_options,
+            progress=progress,
+        )
+
+        output = run_config.output_path(uuid)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(render_html(pack, report), encoding="utf-8")
+
+        _persist_diagnosis_session(
+            run_config.paths.artifact_root,
+            _session_from_diagnosis(
+                uuid=uuid,
+                model=run_config.llm.model,
+                artifact_root=artifact_root,
+                output=output,
+                failed_step=pack.failed_step.name,
+                report=report,
+                exchanges=llm_client.exchanges,
+                download_failures=download_failures,
+                progress_events=progress_events,
+            ),
+        )
+        st.session_state["selected_uuid"] = uuid
+        st.session_state["pending_attachments"] = []
+    except Exception as exc:
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "diagnosis",
+            "failed",
+            "failed",
+            str(exc),
+            warning=str(exc),
+        )
+        _persist_diagnosis_session(
+            run_config.paths.artifact_root,
+            {
+                "uuid": uuid,
+                "model": run_config.llm.model,
+                "summary": str(exc),
+                "confidence": "error",
+                "updated_at": _now(),
+                "artifact_root": str(artifact_root),
+                "error": str(exc),
+                "chat": [],
+                "exchanges": llm_client.exchanges,
+                "download_failures": download_failures,
+                "progress_events": list(progress_events or []),
+            },
+        )
+        st.session_state["selected_uuid"] = uuid
+        st.error(str(exc))
 
 
 def _load_active_session(config: Config, uuid: str) -> dict[str, Any] | None:
@@ -305,6 +467,14 @@ def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> No
     if session.get("error"):
         st.error(session["error"])
         _render_download_failures(session)
+        if st.button("Retry diagnosis"):
+            st.session_state["pending_run"] = {
+                "type": "diagnosis",
+                "uuid": session["uuid"],
+                "model": session.get("model", config.llm.model),
+                "budget": "default",
+            }
+            st.rerun()
         return
 
     st.caption(f"{session['uuid']} · {session['model']}")
@@ -336,11 +506,22 @@ def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> No
 
     prompt = st.chat_input("Ask about this diagnosis")
     if prompt:
-        _send_followup(config, session, prompt)
+        st.session_state["pending_run"] = {
+            "type": "followup",
+            "uuid": session["uuid"],
+            "prompt": prompt,
+        }
         st.rerun()
 
 
-def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None:
+def _send_followup(
+    config: Config,
+    session: dict[str, Any],
+    prompt: str,
+    *,
+    progress: ProgressSink | None = None,
+    progress_events: list[dict[str, Any]] | None = None,
+) -> None:
     pack = EvidenceCollector(Path(session["artifact_root"]), session["uuid"]).collect()
     report = _report_from_session(session)
     context = build_followup_context(
@@ -361,6 +542,7 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
         messages,
         session_id=session["uuid"],
         artifact_root=Path(session["artifact_root"]),
+        progress=progress,
     )
 
     session.setdefault("chat", []).extend(
@@ -370,6 +552,7 @@ def _send_followup(config: Config, session: dict[str, Any], prompt: str) -> None
         ]
     )
     session.setdefault("exchanges", []).extend(llm_client.exchanges)
+    session.setdefault("progress_events", []).extend(progress_events or [])
     session["updated_at"] = _now()
     _persist_diagnosis_session(config.paths.artifact_root, session)
     st.session_state["pending_attachments"] = []
@@ -382,7 +565,7 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         with tabs[0]:
             _render_arena_tab(config)
         return
-    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "API", "Arenas"])
+    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "Progress", "API", "Arenas"])
     with tabs[0]:
         _render_evidence_tab(session)
     with tabs[1]:
@@ -390,8 +573,10 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
     with tabs[2]:
         _render_tool_activity_tab(session)
     with tabs[3]:
-        st.json(session.get("exchanges", []), expanded=False)
+        _render_saved_progress_tab(session)
     with tabs[4]:
+        st.json(session.get("exchanges", []), expanded=False)
+    with tabs[5]:
         _render_arena_tab(config)
 
 
@@ -420,6 +605,9 @@ def _render_arena_tab(config: Config) -> None:
     st.caption(f"{arena['uuid']} · {arena['status']}")
     if arena.get("output"):
         st.write(f"Report: `{arena['output']}`")
+    if arena.get("progress_events"):
+        with st.expander("Progress trace"):
+            _render_saved_progress_tab(arena)
     for contender in arena.get("contenders", []):
         label = _arena_contender_label(contender, reveal_model=reveal)
         with st.expander(label, expanded=True):
@@ -432,6 +620,13 @@ def _render_arena_tab(config: Config) -> None:
             st.markdown("**Root Cause**")
             st.write(report.get("root_cause", ""))
             st.caption(f"Confidence: {report.get('confidence', '')}")
+    if any(contender.get("status") == "failed" for contender in arena.get("contenders", [])):
+        if st.button("Retry failed contenders", key=f"retry-arena-{arena['session_id']}"):
+            st.session_state["pending_run"] = {
+                "type": "arena_retry",
+                "session_id": arena["session_id"],
+            }
+            st.rerun()
     _render_arena_verdict_form(config, arena)
 
 
@@ -583,6 +778,93 @@ def _render_tool_activity_tab(session: dict[str, Any]) -> None:
         st.info("No tool activity recorded.")
 
 
+def _render_saved_progress_tab(session: dict[str, Any]) -> None:
+    events = [
+        event
+        for event in session.get("progress_events", [])
+        if isinstance(event, dict)
+    ]
+    if not events:
+        st.info("No progress trace recorded for this session.")
+        return
+    _render_progress_console(events, title="Saved progress trace")
+
+
+def _render_progress_console(events: list[dict[str, Any]], *, title: str) -> None:
+    st.subheader(title)
+    summary = summarize_progress_events(events)
+    cols = st.columns(5)
+    cols[0].metric("Events", summary["event_count"])
+    cols[1].metric("Tool calls", summary["tool_call_count"])
+    cols[2].metric("Tool result chars", summary["tool_result_chars"])
+    cols[3].metric("Tokens", summary["total_tokens"])
+    cols[4].metric("Cost", _format_usd(summary["total_cost"]))
+    if summary["warnings"]:
+        st.warning(", ".join(summary["warnings"]))
+    if not events:
+        st.info("Waiting for the run to start.")
+        return
+
+    arena_events = [event for event in events if event.get("run_type") == "arena"]
+    contenders = sorted(
+        {
+            str(event.get("contender_id"))
+            for event in arena_events
+            if event.get("contender_id")
+        }
+    )
+    if contenders:
+        columns = st.columns(len(contenders))
+        for column, contender_id in zip(columns, contenders, strict=False):
+            contender_events = [
+                event for event in arena_events if event.get("contender_id") == contender_id
+            ]
+            status = contender_events[-1].get("status", "queued") if contender_events else "queued"
+            phase = contender_events[-1].get("phase", "") if contender_events else ""
+            column.metric(f"Contender {contender_id}", status, phase)
+
+    rows = [
+        {
+            "time": event.get("created_at", ""),
+            "phase": event.get("phase", ""),
+            "status": event.get("status", ""),
+            "contender": event.get("contender_id", ""),
+            "message": event.get("message", ""),
+            "tool": event.get("tool_name", ""),
+            "target": event.get("target", ""),
+            "chars": event.get("result_chars", ""),
+        }
+        for event in events[-25:]
+    ]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    with st.expander("Raw progress trace"):
+        st.json(events, expanded=False)
+
+
+def _emit_ui_progress(
+    progress: ProgressSink | None,
+    run_id: str,
+    run_type: str,
+    phase: str,
+    status: str,
+    message: str,
+    *,
+    warning: str | None = None,
+) -> None:
+    if progress is None:
+        return
+    progress(
+        ProgressEvent(
+            run_id=run_id,
+            run_type=run_type,
+            phase=phase,
+            status=status,
+            message=message,
+            warning=warning,
+        )
+    )
+
+
 def _render_files_tab(config: Config, session: dict[str, Any]) -> None:
     root = Path(session.get("artifact_root", config.paths.artifact_root / session["uuid"]))
     files = list_artifact_files(root)
@@ -637,6 +919,7 @@ def _session_from_diagnosis(
     report: DiagnosisReport,
     exchanges: list[dict[str, Any]],
     download_failures: list[dict[str, Any]],
+    progress_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "uuid": uuid,
@@ -665,7 +948,12 @@ def _session_from_diagnosis(
         "chat": [],
         "exchanges": exchanges,
         "download_failures": download_failures,
+        "progress_events": list(progress_events or []),
     }
+
+
+def _append_progress_event(events: list[dict[str, Any]], event: ProgressEvent) -> None:
+    events.append(event.to_trace())
 
 
 def _persist_diagnosis_session(

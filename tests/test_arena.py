@@ -122,6 +122,100 @@ def test_arena_runner_executes_models_sequentially_with_isolated_sessions(tmp_pa
     ]
 
 
+def test_arena_runner_emits_blind_progress_events(tmp_path):
+    _copy_fixture(tmp_path)
+    config = _config(tmp_path)
+    factory = FakeClientFactory()
+    factory.clients = {
+        "model/a": FakeArenaClient("model/a", _report("A summary", "A cause")),
+        "model/b": FakeArenaClient("model/b", _report("B summary", "B cause")),
+    }
+    runner = ArenaRunner(config, client_factory=factory)
+    events = []
+
+    runner.run(
+        "sample-uuid",
+        ArenaOptions(
+            models=["model/a", "model/b"],
+            budget="quick",
+            output=tmp_path / "arena.html",
+        ),
+        progress=events.append,
+    )
+
+    traces = [event.to_trace() for event in events]
+    assert traces[0]["phase"] == "arena_started"
+    assert traces[0]["message"] == "Arena started with 2 contenders"
+    assert [
+        (event["phase"], event.get("contender_id"), event["message"])
+        for event in traces
+        if event["phase"] in {"contender_started", "contender_completed"}
+    ] == [
+        ("contender_started", "A", "Contender A started"),
+        ("contender_completed", "A", "Contender A completed"),
+        ("contender_started", "B", "Contender B started"),
+        ("contender_completed", "B", "Contender B completed"),
+    ]
+    assert "model/a" not in "\n".join(event["message"] for event in traces)
+    assert factory.clients["model/a"].calls[0]["run_type"] == "arena"
+    assert factory.clients["model/a"].calls[0]["contender_id"] == "A"
+
+
+def test_arena_runner_retries_failed_contenders_without_replacing_successes(tmp_path):
+    _copy_fixture(tmp_path)
+    config = _config(tmp_path)
+    factory = FakeClientFactory()
+    factory.clients = {
+        "model/b": FakeArenaClient("model/b", _report("B retry", "B fixed")),
+    }
+    runner = ArenaRunner(config, client_factory=factory)
+    session = {
+        "schema_version": 2,
+        "session_id": "arena-sample",
+        "session_type": "arena",
+        "uuid": "sample-uuid",
+        "status": "completed_with_errors",
+        "summary": "1/2 contenders completed",
+        "artifact_root": str(config.paths.artifact_root / "sample-uuid"),
+        "budget": "quick",
+        "output": str(tmp_path / "arena.html"),
+        "contenders": [
+            {
+                "contender_id": "A",
+                "model": "model/a",
+                "status": "completed",
+                "report": {"summary": "A summary"},
+            },
+            {
+                "contender_id": "B",
+                "model": "model/b",
+                "status": "failed",
+                "error": "model exploded",
+            },
+        ],
+    }
+    events = []
+
+    updated = runner.retry_failed(
+        session,
+        ArenaOptions(models=["model/a", "model/b"], budget="quick"),
+        progress=events.append,
+    )
+
+    assert updated["status"] == "completed"
+    assert updated["contenders"][0]["report"]["summary"] == "A summary"
+    assert updated["contenders"][1]["report"]["summary"] == "B retry"
+    assert updated["contenders"][1]["contender_id"] == "B"
+    assert Path(updated["output"]).read_text(encoding="utf-8").count("B retry") == 1
+    assert [event.phase for event in events] == [
+        "contender_started",
+        "model_request",
+        "completed",
+        "contender_completed",
+        "arena_completed",
+    ]
+
+
 def test_arena_runner_persists_partial_failures(tmp_path):
     _copy_fixture(tmp_path)
     config = _config(tmp_path)

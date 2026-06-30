@@ -368,6 +368,73 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert "wait timed out" in client.exchanges[1]["request"]["messages"][-1]["content"]
 
 
+def test_openrouter_client_emits_progress_for_tool_loop(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    output = artifact_root / "generated/sunbeam/output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("wait timed out\nretry failed", encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                usage=FakeUsage(),
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/sunbeam/output.log"}),
+                    ),
+                ],
+            ),
+            FakeSdkResponse(
+                json.dumps(
+                    {
+                        "summary": "The deploy step timed out.",
+                        "failure_surface": "sunbeam cluster resize timed out.",
+                        "confidence": "supported",
+                        "root_cause": "Readiness did not converge before timeout.",
+                        "evidence": [
+                            {
+                                "path": "generated/sunbeam/output.log",
+                                "line": 1,
+                                "excerpt": "wait timed out",
+                            }
+                        ],
+                        "candidate_mechanisms": [],
+                        "recommendations": [],
+                        "unknowns": [],
+                    }
+                ),
+                usage=FakeUsage(),
+            ),
+        ]
+    )
+    client = OpenRouterClient(_config(), sdk_client=sdk)
+    events = []
+
+    client.diagnose(
+        "evidence text",
+        session_id="uuid-diagnosis",
+        artifact_root=artifact_root,
+        max_tool_rounds=2,
+        progress=events.append,
+    )
+
+    traces = [event.to_trace() for event in events]
+    assert [event["phase"] for event in traces] == [
+        "model_request",
+        "tool_call",
+        "tool_result",
+        "model_request",
+        "completed",
+    ]
+    assert traces[1]["tool_name"] == "get_artifact_file"
+    assert traces[1]["target"] == "generated/sunbeam/output.log"
+    assert traces[2]["result_chars"] > 0
+    assert traces[-1]["total_tokens"] == 120
+    assert traces[-1]["total_cost"] == 0.00123
+
+
 def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     artifact_root = tmp_path / "uuid"
     log = artifact_root / "generated/run.log"
