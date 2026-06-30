@@ -1,8 +1,10 @@
+from dataclasses import replace
 import importlib.util
 from pathlib import Path
 
 from sunbeam_triage.evidence import EvidenceCollector
 from sunbeam_triage.llm import DiagnosisReport, ReportEvidence
+from sunbeam_triage.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.progress import ProgressEvent
 from sunbeam_triage.ui_helpers import (
     build_followup_context,
@@ -111,6 +113,40 @@ def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
     assert "Attached Context:" in context
 
 
+def test_build_followup_context_includes_deterministic_probe_findings():
+    pack = EvidenceCollector(Path("tests/fixtures/sample_uuid"), "sample-uuid").collect()
+    pack = replace(
+        pack,
+        probe_results=(
+            ProbeResult(
+                name="k8s_not_ready",
+                status="triggered",
+                summary="Collected deterministic k8s evidence.",
+                findings=[
+                    ProbeFinding(
+                        category="sosreport_journal",
+                        path="sosreport-node.tar.xz:sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s",
+                        line=12,
+                        excerpt="network is not ready: cni plugin not initialized",
+                    )
+                ],
+            ),
+        ),
+    )
+    report = DiagnosisReport(
+        summary="Timed out",
+        failure_surface="Deploy timeout",
+        confidence="supported",
+        root_cause="",
+    )
+
+    context = build_followup_context(pack, report)
+
+    assert "Deterministic Probes:" in context
+    assert "k8s_not_ready" in context
+    assert "cni plugin not initialized" in context
+
+
 def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
     app = _streamlit_app()
     report = DiagnosisReport(
@@ -166,6 +202,43 @@ def test_diagnosis_session_persists_progress_events(tmp_path):
     )
 
     assert session["progress_events"] == [event.to_trace()]
+
+
+def test_diagnosis_session_persists_probe_results(tmp_path):
+    app = _streamlit_app()
+    report = DiagnosisReport(
+        summary="Incomplete",
+        failure_surface="K8s timeout",
+        confidence="supported",
+        root_cause="",
+    )
+    probe = ProbeResult(
+        name="k8s_not_ready",
+        status="triggered",
+        summary="Collected deterministic k8s evidence.",
+        findings=[
+            ProbeFinding(
+                category="sosreport_journal",
+                path="generated/sunbeam/sosreport-node.tar.xz:sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s",
+                line=12,
+                excerpt="network is not ready: cni plugin not initialized",
+            )
+        ],
+    )
+
+    session = app._session_from_diagnosis(
+        uuid="uuid",
+        model="model/a",
+        artifact_root=tmp_path / "uuid",
+        output=tmp_path / "diagnostics.html",
+        failed_step="sunbeam_test",
+        report=report,
+        exchanges=[],
+        download_failures=[],
+        probe_results=[probe],
+    )
+
+    assert session["probe_results"] == [probe.to_dict()]
 
 
 def test_append_progress_event_records_concise_trace():

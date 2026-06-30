@@ -63,6 +63,7 @@ class ArenaRunner:
             "artifact_root": str(artifact_root),
             "budget": options.budget,
             "evidence": [asdict(item) for item in pack.evidence],
+            "probe_results": [result.to_dict() for result in pack.probe_results],
             "failed_step": asdict(pack.failed_step),
             "run": asdict(pack.run),
             "contenders": [],

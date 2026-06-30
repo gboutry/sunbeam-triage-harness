@@ -95,6 +95,7 @@ def test_arena_runner_executes_models_sequentially_with_isolated_sessions(tmp_pa
     assert session["session_type"] == "arena"
     assert session["status"] == "completed"
     assert session["artifact_root"] == str(artifact_root)
+    assert session["probe_results"][0]["name"] == "k8s_not_ready"
     assert [item["contender_id"] for item in session["contenders"]] == ["A", "B"]
     assert [item["model"] for item in session["contenders"]] == ["model/a", "model/b"]
     assert session["contenders"][0]["report"]["summary"] == "A summary"

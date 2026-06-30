@@ -392,6 +392,14 @@ def _start_diagnosis(
             "Collecting evidence",
         )
         pack = EvidenceCollector(artifact_root, uuid).collect()
+        _emit_ui_progress(
+            progress,
+            uuid,
+            "diagnosis",
+            "probe",
+            "completed",
+            f"Ran {len(pack.probe_results)} deterministic probes",
+        )
 
         report = llm_client.diagnose(
             pack.to_prompt_text(),
@@ -418,6 +426,7 @@ def _start_diagnosis(
                 report=report,
                 exchanges=llm_client.exchanges,
                 download_failures=download_failures,
+                probe_results=pack.probe_results,
                 progress_events=progress_events,
             ),
         )
@@ -565,18 +574,22 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         with tabs[0]:
             _render_arena_tab(config)
         return
-    tabs = st.tabs(["Evidence", "Files", "Tool Activity", "Progress", "API", "Arenas"])
+    tabs = st.tabs(
+        ["Evidence", "Probes", "Files", "Tool Activity", "Progress", "API", "Arenas"]
+    )
     with tabs[0]:
         _render_evidence_tab(session)
     with tabs[1]:
-        _render_files_tab(config, session)
+        _render_probe_tab(session)
     with tabs[2]:
-        _render_tool_activity_tab(session)
+        _render_files_tab(config, session)
     with tabs[3]:
-        _render_saved_progress_tab(session)
+        _render_tool_activity_tab(session)
     with tabs[4]:
-        st.json(session.get("exchanges", []), expanded=False)
+        _render_saved_progress_tab(session)
     with tabs[5]:
+        st.json(session.get("exchanges", []), expanded=False)
+    with tabs[6]:
         _render_arena_tab(config)
 
 
@@ -760,6 +773,59 @@ def _render_evidence_tab(session: dict[str, Any]) -> None:
             st.rerun()
 
 
+def _render_probe_tab(session: dict[str, Any]) -> None:
+    probe_results = [
+        result
+        for result in session.get("probe_results", [])
+        if isinstance(result, dict)
+    ]
+    if not probe_results:
+        st.info("No deterministic probe results recorded.")
+        return
+    rows = []
+    for result in probe_results:
+        for finding in result.get("findings", []):
+            if not isinstance(finding, dict):
+                continue
+            rows.append(
+                {
+                    "probe": result.get("name", ""),
+                    "status": result.get("status", ""),
+                    "category": finding.get("category", ""),
+                    "path": finding.get("path", ""),
+                    "line": finding.get("line", ""),
+                    "excerpt": finding.get("excerpt", ""),
+                }
+            )
+    if rows:
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    for result in probe_results:
+        st.markdown(
+            f"**{result.get('name', '')}** · {result.get('status', '')}: "
+            f"{result.get('summary', '')}"
+        )
+        for index, finding in enumerate(result.get("findings", [])):
+            if not isinstance(finding, dict):
+                continue
+            label = _format_attachment(finding)
+            st.code(finding.get("excerpt", ""), language=None)
+            if st.button(
+                f"Attach probe {label}",
+                key=f"attach-probe-{result.get('name', '')}-{index}",
+            ):
+                _add_attachment(
+                    {
+                        "path": finding.get("path", ""),
+                        "line": finding.get("line"),
+                        "text": finding.get("excerpt", ""),
+                    }
+                )
+                st.rerun()
+        missing = result.get("missing_evidence", [])
+        if missing:
+            st.caption("Missing evidence: " + "; ".join(str(item) for item in missing))
+
+
 def _render_tool_activity_tab(session: dict[str, Any]) -> None:
     analysis = analyze_tool_activity(session)
     cols = st.columns(5)
@@ -919,6 +985,7 @@ def _session_from_diagnosis(
     report: DiagnosisReport,
     exchanges: list[dict[str, Any]],
     download_failures: list[dict[str, Any]],
+    probe_results: Any | None = None,
     progress_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -948,6 +1015,10 @@ def _session_from_diagnosis(
         "chat": [],
         "exchanges": exchanges,
         "download_failures": download_failures,
+        "probe_results": [
+            result.to_dict() if hasattr(result, "to_dict") else result
+            for result in list(probe_results or [])
+        ],
         "progress_events": list(progress_events or []),
     }
 

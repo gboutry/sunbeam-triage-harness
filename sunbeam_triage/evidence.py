@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .probes import ProbeResult, run_preflight_probes
+
 
 CLEANUP_STEP_NAMES = {
     "Collect logs",
@@ -72,6 +74,7 @@ class EvidencePack:
     run: RunInfo
     failed_step: FailedStep
     evidence: tuple[EvidenceItem, ...]
+    probe_results: tuple[ProbeResult, ...] = ()
 
     def to_prompt_text(self, max_chars: int = 60000) -> str:
         parts = [
@@ -89,6 +92,9 @@ class EvidencePack:
         for item in self.evidence:
             line = "" if item.line is None else f":{item.line}"
             parts.append(f"- [{item.kind}] {item.path}{line}: {item.excerpt}")
+        probe_lines = _probe_prompt_lines(self.probe_results)
+        if probe_lines:
+            parts.extend(["", "Deterministic Probes:", *probe_lines])
         text = "\n".join(parts)
         if len(text) > max_chars:
             return text[: max_chars - 200] + "\n\n[Evidence truncated by harness]\n"
@@ -122,12 +128,14 @@ class EvidenceCollector:
             family=self._step_family(step.get("name", "")),
         )
         evidence = self._collect_evidence(failed)
+        probe_results = run_preflight_probes(self.root, self.uuid)
         return EvidencePack(
             uuid=self.uuid,
             root=self.root,
             run=run,
             failed_step=failed,
             evidence=tuple(evidence),
+            probe_results=probe_results,
         )
 
     def _read_json(self, rel: str) -> dict[str, Any]:
@@ -265,3 +273,19 @@ class EvidenceCollector:
 
 def _redact(text: str) -> str:
     return SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", text)
+
+
+def _probe_prompt_lines(probe_results: tuple[ProbeResult, ...]) -> list[str]:
+    lines: list[str] = []
+    for result in probe_results:
+        if result.status == "not_applicable":
+            continue
+        lines.append(f"- [{result.name}] {result.status}: {result.summary}")
+        for finding in result.findings[:20]:
+            line = "" if finding.line is None else f":{finding.line}"
+            lines.append(
+                f"  - [{finding.category}] {finding.path}{line}: {finding.excerpt}"
+            )
+        for missing in result.missing_evidence:
+            lines.append(f"  - [missing] {missing}")
+    return lines

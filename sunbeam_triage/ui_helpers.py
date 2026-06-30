@@ -152,6 +152,9 @@ def build_followup_context(
     for item in pack.evidence:
         line = "" if item.line is None else f":{item.line}"
         parts.append(f"- [{item.kind}] {item.path}{line}: {item.excerpt}")
+    probe_lines = _probe_context_lines(pack)
+    if probe_lines:
+        parts.extend(["", "Deterministic Probes:", *probe_lines])
     if report.recommendations:
         parts.extend(["", "Recommendations:"])
         parts.extend(f"- {item}" for item in report.recommendations)
@@ -187,6 +190,22 @@ def build_followup_context(
             line = "" if item.get("line") is None else f":{item['line']}"
             parts.append(f"- {item.get('path', '')}{line}: {item.get('text', '')}")
     return "\n".join(parts)
+
+
+def _probe_context_lines(pack: EvidencePack) -> list[str]:
+    lines: list[str] = []
+    for result in pack.probe_results:
+        if result.status == "not_applicable":
+            continue
+        lines.append(f"- [{result.name}] {result.status}: {result.summary}")
+        for finding in result.findings[:20]:
+            line = "" if finding.line is None else f":{finding.line}"
+            lines.append(
+                f"  - [{finding.category}] {finding.path}{line}: {finding.excerpt}"
+            )
+        for missing in result.missing_evidence:
+            lines.append(f"  - [missing] {missing}")
+    return lines
 
 
 def _redact_headers(headers: dict[str, str]) -> dict[str, str]:

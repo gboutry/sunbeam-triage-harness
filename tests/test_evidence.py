@@ -29,6 +29,22 @@ def test_evidence_pack_prompt_is_bounded_and_contains_file_references():
     assert "Claim only what the evidence supports" in prompt
 
 
+def test_evidence_pack_prompt_includes_triggered_probe_findings(tmp_path):
+    _write_jobs(tmp_path, failed_step_name="Deploy sunbeam")
+    (tmp_path / "generated/sunbeam").mkdir(parents=True)
+    (tmp_path / "generated/sunbeam/output.log").write_text(
+        "Application 'k8s' is not ready: TimeoutError('wait timed out')\n"
+        "message='Unready Pods: kube-system/coredns-a'\n",
+        encoding="utf-8",
+    )
+
+    prompt = EvidenceCollector(tmp_path, "uuid").collect().to_prompt_text()
+
+    assert "Deterministic Probes:" in prompt
+    assert "k8s_not_ready" in prompt
+    assert "Unready Pods: kube-system/coredns-a" in prompt
+
+
 def test_evidence_redacts_obvious_secret_values():
     root = Path("tests/fixtures/sample_uuid")
 
