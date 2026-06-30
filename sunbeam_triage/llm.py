@@ -39,6 +39,7 @@ TOOL_RESULT_TRUNCATED_MARKER = json.dumps(
     {"tool_result_truncated_by_budget": True},
     sort_keys=True,
 )
+MAX_TOOL_CALLS_PER_ROUND = 4
 
 
 @dataclass(frozen=True)
@@ -297,11 +298,17 @@ class OpenRouterClient:
                         "evidence. Do not invent files, timestamps, or causes. "
                         "Actively inspect the next likely decisive artifact when "
                         "the current evidence only identifies a wrapper failure. "
-                        "Prefer the first meaningful error over the final visible "
-                        "stack trace. Separate direct evidence from inference, "
-                        "use timestamps to correlate services, identify cascades "
-                        "when possible, and check at least one plausible "
-                        "alternative before claiming high confidence. "
+                        "Prefer the earliest event that explains the final failure "
+                        "surface over later cascades or merely crisp symptoms. "
+                        "A workload process crash is not sufficient evidence for "
+                        "Juju unit-agent lost unless Juju status history, unit-agent "
+                        "logs, or controller logs connect those events. Separate "
+                        "direct evidence from inference, use timestamps to "
+                        "correlate services, identify cascades when possible, and "
+                        "check at least one plausible alternative before claiming "
+                        "high confidence. For each candidate mechanism, include "
+                        "evidence for it, evidence against it, missing evidence, "
+                        "and a confirmed/supported/speculative classification. "
                         "Use search_artifacts before reading whole files. For "
                         "sosreport archives, use search_sosreport before reading "
                         "a specific member. Prefer line windows over full file "
@@ -418,9 +425,13 @@ class OpenRouterClient:
                         "Separate evidence from inference. Actively inspect the "
                         "next likely decisive artifact when the current context "
                         "only identifies a wrapper failure. "
-                        "Prefer the first meaningful error over later cascading "
-                        "failures, correlate timestamps across logs, and preserve "
-                        "uncertainty when evidence is incomplete. "
+                        "Prefer the earliest event that explains the final failure "
+                        "surface over later cascades or merely crisp symptoms. "
+                        "A workload process crash is not sufficient evidence for "
+                        "Juju unit-agent lost unless Juju status history, unit-agent "
+                        "logs, or controller logs connect those events. Correlate "
+                        "timestamps across logs, and preserve uncertainty when "
+                        "evidence is incomplete. "
                         "Use search_artifacts "
                         "before reading whole files. For sosreport archives, use "
                         "search_sosreport before reading a specific member. "
@@ -487,6 +498,7 @@ class OpenRouterClient:
             max_tool_rounds=max_tool_rounds,
         )
         state = InvestigationState(options=options)
+        seen_tool_call_keys: set[str] = set()
         request = {
             **request,
             "tools": artifact_tool_definitions(),
@@ -528,6 +540,7 @@ class OpenRouterClient:
                 artifact_root,
                 tool_calls,
                 max_chars=options.max_tool_result_chars,
+                seen_tool_call_keys=seen_tool_call_keys,
             )
             for tool_call, message in zip(tool_calls, tool_result_messages, strict=False):
                 name, arguments = _tool_call_name_and_arguments(tool_call)
@@ -976,16 +989,75 @@ def _tool_result_messages(
     tool_calls: list[Any],
     *,
     max_chars: int,
+    seen_tool_call_keys: set[str],
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     remaining_budget = max(max_chars, 0)
     for index, tool_call in enumerate(tool_calls):
         remaining_calls = len(tool_calls) - index
         call_budget = remaining_budget // remaining_calls if remaining_calls else 0
-        message = _tool_result_message(root, tool_call, max_chars=call_budget)
+        message = _bounded_tool_result_message(
+            root,
+            tool_call,
+            index=index,
+            max_chars=call_budget,
+            seen_tool_call_keys=seen_tool_call_keys,
+        )
         remaining_budget = max(remaining_budget - len(message["content"]), 0)
         messages.append(message)
     return messages
+
+
+def _bounded_tool_result_message(
+    root: Path,
+    tool_call: Any,
+    *,
+    index: int,
+    max_chars: int,
+    seen_tool_call_keys: set[str],
+) -> dict[str, Any]:
+    if index >= MAX_TOOL_CALLS_PER_ROUND:
+        return _synthetic_tool_result_message(
+            tool_call,
+            {
+                "ok": False,
+                "round_tool_limit_reached": True,
+                "reason": (
+                    f"Tool call skipped because the per-round limit is "
+                    f"{MAX_TOOL_CALLS_PER_ROUND}."
+                ),
+            },
+            max_chars=max_chars,
+        )
+    key = _tool_call_cache_key(tool_call)
+    if key in seen_tool_call_keys:
+        return _synthetic_tool_result_message(
+            tool_call,
+            {
+                "ok": False,
+                "duplicate_tool_call": True,
+                "reason": (
+                    "Duplicate tool call skipped; use earlier result for same "
+                    "arguments."
+                ),
+            },
+            max_chars=max_chars,
+        )
+    seen_tool_call_keys.add(key)
+    return _tool_result_message(root, tool_call, max_chars=max_chars)
+
+
+def _synthetic_tool_result_message(
+    tool_call: Any,
+    result: dict[str, Any],
+    *,
+    max_chars: int,
+) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": _tool_call_id(tool_call),
+        "content": _tool_result_content(result, max_chars=max_chars),
+    }
 
 
 def _tool_result_content(result: dict[str, Any], *, max_chars: int) -> str:
@@ -1046,9 +1118,12 @@ def _final_request_with_state(
                 "exhausted if stop_reason is budget_exhausted. Answer using "
                 "the initial evidence, tool results already provided, and this "
                 f"investigation state: {state.to_prompt_summary()}. Do not "
-                "request more files. Prefer the first meaningful error over "
-                "later cascades. Separate evidence from inference. Include a "
-                "partial but useful conclusion, confidence, missing evidence, "
+                "request more files. Prefer the earliest event that explains "
+                "the final failure surface over later cascades or merely crisp "
+                "symptoms. A workload process crash is not sufficient evidence "
+                "for Juju unit-agent lost unless Juju evidence connects the "
+                "events. Separate evidence from inference. Include a partial "
+                "but useful conclusion, confidence, missing evidence, "
                 "alternatives considered or unchecked due budget, and "
                 "recommended next checks. Do not mark a diagnosis confirmed "
                 "solely from discovery-only tool results; preserve uncertainty "
@@ -1084,6 +1159,15 @@ def _tool_call_name_and_arguments(tool_call: Any) -> tuple[str, dict[str, Any]]:
     if not isinstance(parsed, dict):
         parsed = {}
     return name, parsed
+
+
+def _tool_call_cache_key(tool_call: Any) -> str:
+    name, arguments = _tool_call_name_and_arguments(tool_call)
+    return json.dumps(
+        {"name": name, "arguments": arguments},
+        sort_keys=True,
+        default=str,
+    )
 
 
 def _tool_call_id(tool_call: Any) -> str:

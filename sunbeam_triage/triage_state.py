@@ -38,6 +38,7 @@ class ToolObservation:
     timestamp_count: int = 0
     truncated: bool = False
     error: str = ""
+    missing_evidence: tuple[str, ...] = ()
 
 
 @dataclass
@@ -76,6 +77,10 @@ class InvestigationState:
             self._seen_evidence.add(evidence_key)
             made_progress = True
             self.evidence_found.append(_evidence_item_from_key(evidence_key))
+
+        for missing in observation.missing_evidence:
+            if missing and missing not in self.missing_evidence:
+                self.missing_evidence.append(missing)
 
         if observation.timestamp_count and made_progress:
             self.failure_timeline.append(
@@ -179,6 +184,7 @@ def observe_tool_result(
         timestamp_count=len(_TIMESTAMP_RE.findall(content)),
         truncated=bool(result.get("tool_result_truncated_by_budget")),
         error=str(result.get("error", "")),
+        missing_evidence=tuple(_missing_evidence(tool_name, arguments, result)),
     )
 
 
@@ -189,6 +195,8 @@ def _evidence_keys(
     content: str,
 ) -> list[str]:
     keys: list[str] = []
+    if _result_is_non_evidence(result):
+        return keys
     matches = result.get("matches")
     if isinstance(matches, list):
         for item in matches:
@@ -221,6 +229,39 @@ def _evidence_keys(
         if excerpt:
             keys.append(_pack_evidence(path, arguments.get("line_start"), excerpt))
     return keys
+
+
+def _missing_evidence(
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> list[str]:
+    missing: list[str] = []
+    if result.get("tool_result_truncated_by_budget"):
+        detail = str(result.get("error") or "Tool result was truncated by budget.")
+        missing.append(detail)
+    if result.get("duplicate_tool_call"):
+        missing.append("Duplicate tool call skipped; earlier result should be reused.")
+    if result.get("round_tool_limit_reached"):
+        missing.append("Tool call skipped because the per-round tool limit was reached.")
+    if (
+        tool_name in {"search_artifacts", "search_sosreport"}
+        and result.get("ok") is True
+        and result.get("matches") == []
+    ):
+        pattern = str(arguments.get("pattern", ""))
+        target = str(arguments.get("path_prefix") or arguments.get("archive_path") or "")
+        missing.append(f"No matches found for targeted search {pattern!r} in {target}.")
+    return missing
+
+
+def _result_is_non_evidence(result: dict[str, Any]) -> bool:
+    return bool(
+        result.get("tool_result_truncated_by_budget")
+        or result.get("duplicate_tool_call")
+        or result.get("round_tool_limit_reached")
+        or result.get("ok") is False
+    )
 
 
 def _pack_evidence(path: str, line: Any, excerpt: str) -> str:

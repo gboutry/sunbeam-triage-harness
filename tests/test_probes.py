@@ -10,7 +10,12 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
 
     results = run_preflight_probes(tmp_path, "uuid")
 
-    assert [result.name for result in results] == ["k8s_not_ready"]
+    assert [result.name for result in results] == [
+        "k8s_not_ready",
+        "juju_lost_unit",
+        "juju_migration",
+        "workload_crash_recovery",
+    ]
     assert results[0].status == "not_applicable"
     assert results[0].findings == []
 
@@ -162,6 +167,106 @@ def test_k8s_not_ready_probe_deduplicates_repeated_journal_messages(tmp_path):
     ]
     assert len(journal_findings) == 1
     assert "Failed to watch configmap" in journal_findings[0].excerpt
+
+
+def test_juju_lost_unit_probe_extracts_lost_unit_and_missing_leader(tmp_path):
+    _write_output(
+        tmp_path,
+        "ERROR leader for application-k8s not found\n",
+    )
+    _write(
+        tmp_path,
+        "generated/sunbeam/juju_status_openstack-machines.txt",
+        "k8s/0 unknown lost 0 10.195.18.1 6443/tcp agent lost, "
+        "see 'juju show-status-log k8s/0'\n",
+    )
+    _write(
+        tmp_path,
+        "generated/sunbeam/sunbeam_cluster_list.txt",
+        "│ node1 │ running │ active  │ unknown │         │ active  │\n",
+    )
+
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "juju_lost_unit")
+
+    assert result.status == "triggered"
+    assert "Juju unit-agent/leader loss" in result.summary
+    assert any(finding.category == "final_status" for finding in result.findings)
+    assert any(finding.category == "missing_leader" for finding in result.findings)
+    assert any(finding.category == "control_plane_unknown" for finding in result.findings)
+    assert any("juju show-status-log k8s/0" in item for item in result.missing_evidence)
+
+
+def test_juju_migration_probe_separates_observed_from_failed_migration(tmp_path):
+    _write(
+        tmp_path,
+        "generated/sunbeam/juju_debug_log_openstack-machines.txt",
+        "\n".join(
+            [
+                "15:06:43 INFO migration phase is now QUIESCE",
+                "15:07:07 INFO migration phase is now SUCCESS",
+                '15:07:07 INFO juju.worker.deployer stopped "k8s/0", err: <nil>',
+                '15:07:07 INFO juju.worker.deployer start "unit-k8s-0"',
+            ]
+        ),
+    )
+
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "juju_migration")
+
+    assert result.status == "triggered"
+    assert "observed; failure is unconfirmed" in result.summary
+    assert any(finding.category == "migration_event" for finding in result.findings)
+    assert any(finding.category == "unit_lifecycle" for finding in result.findings)
+    assert any("No direct failed-migration evidence" in item for item in result.missing_evidence)
+
+
+def test_workload_crash_recovery_probe_records_crash_and_recovery_counterevidence(
+    tmp_path,
+):
+    archive = tmp_path / "generated/sunbeam/sosreport-node1-2026-06-29-abcd.tar.xz"
+    _write_sosreport(
+        archive,
+        {
+            "sosreport-node1-2026-06-29-abcd/var/log/apport.log": (
+                "INFO: apport 2026-06-29 17:37:44,365: called for global pid "
+                "22844, signal 11\n"
+                "INFO: apport 2026-06-29 17:37:44,367: executable: "
+                "/snap/k8s/5279/bin/k8s (command line \"/snap/k8s/5279/bin/k8sd\")\n"
+            ),
+            "sosreport-node1-2026-06-29-abcd/"
+            "sos_commands/systemd/systemctl_list-units": (
+                "snap.k8s.k8sd.service loaded active running\n"
+            ),
+            "sosreport-node1-2026-06-29-abcd/"
+            "sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s": (
+                "Jun 29 15:21:55 node1 k8s.k8sd[22844]: "
+                "checking service arguments for drift\n"
+                "Jun 29 18:21:55 node1 k8s.k8sd[4114976]: "
+                "checking service arguments for drift\n"
+            ),
+        },
+    )
+
+    result = _probe_by_name(
+        run_preflight_probes(tmp_path, "uuid"),
+        "workload_crash_recovery",
+    )
+
+    assert result.status == "triggered"
+    assert "counter-evidence was found" in result.summary
+    assert any(finding.category == "workload_crash" for finding in result.findings)
+    assert any(finding.category == "recovery_counterevidence" for finding in result.findings)
+    assert not any("15:21:55" in finding.excerpt for finding in result.findings)
+    assert any(
+        "not sufficient evidence for Juju unit lost" in item
+        for item in result.missing_evidence
+    )
+
+
+def _probe_by_name(results, name):
+    for result in results:
+        if result.name == name:
+            return result
+    raise AssertionError(f"missing probe {name}")
 
 
 def _write_output(root: Path, text: str) -> None:

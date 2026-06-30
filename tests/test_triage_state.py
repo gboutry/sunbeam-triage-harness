@@ -106,3 +106,80 @@ def test_investigation_state_stops_on_budget_exhaustion_with_partial_summary():
     assert state.stop_reason == "budget_exhausted"
     assert "budget_exhausted" in state.to_prompt_summary()
 
+
+def test_empty_targeted_search_records_missing_evidence_and_allows_finalization():
+    options = TriageLoopOptions(max_rounds=12, hard_max_rounds=20)
+    state = InvestigationState(options=options)
+
+    state.apply_observation(
+        observe_tool_result(
+            "search_artifacts",
+            {"pattern": "k8s/0.*lost"},
+            json.dumps(
+                {
+                    "ok": True,
+                    "matches": [
+                        {
+                            "path": "generated/sunbeam/status.txt",
+                            "line": 10,
+                            "excerpt": "k8s/0 unknown lost agent lost",
+                        },
+                    ],
+                }
+            ),
+        )
+    )
+    state.apply_observation(
+        observe_tool_result(
+            "search_sosreport",
+            {"archive_path": "sosreport.tar.xz", "pattern": "juju.*unit-k8s"},
+            json.dumps(
+                {
+                    "ok": True,
+                    "matches": [
+                        {
+                            "path": "var/log/juju/unit-k8s-0.log",
+                            "line": 22,
+                            "excerpt": "unit-k8s-0 successfully connected",
+                        },
+                    ],
+                }
+            ),
+        )
+    )
+    state.apply_observation(
+        observe_tool_result(
+            "search_sosreport",
+            {"archive_path": "sosreport.tar.xz", "pattern": "invalid entity|password"},
+            json.dumps({"ok": True, "matches": []}),
+        )
+    )
+
+    assert state.should_finalize() is True
+    assert state.stop_reason == "sufficient_evidence"
+    assert state.missing_evidence
+    assert "invalid entity|password" in state.missing_evidence[0]
+
+
+def test_truncated_result_counts_as_missing_evidence_and_non_progress():
+    options = TriageLoopOptions(max_rounds=12, hard_max_rounds=20, stall_limit=1)
+    state = InvestigationState(options=options)
+
+    state.apply_observation(
+        observe_tool_result(
+            "get_artifact_file",
+            {"path": "generated/sunbeam/output.log"},
+            json.dumps(
+                {
+                    "ok": False,
+                    "tool_result_truncated_by_budget": True,
+                    "error": "Tool result exceeded budget; narrow the request.",
+                }
+            ),
+        )
+    )
+
+    assert state.stall_count == 1
+    assert state.missing_evidence
+    assert state.should_finalize() is True
+    assert state.stop_reason == "stalled"

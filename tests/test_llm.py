@@ -366,6 +366,96 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert sdk.chat.calls[0]["tools"] == client.exchanges[0]["request"]["tools"]
     assert client.exchanges[0]["response"]["tool_calls"][0]["id"] == "call-1"
     assert "wait timed out" in client.exchanges[1]["request"]["messages"][-1]["content"]
+    system_prompt = first_call["messages"][0]["content"]
+    assert "earliest event that explains the final failure surface" in system_prompt
+    assert "A workload process crash is not sufficient evidence" in system_prompt
+    assert "first meaningful error" not in system_prompt
+
+
+def test_openrouter_client_deduplicates_repeated_tool_calls(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    output = artifact_root / "generated/sunbeam/output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("wait timed out\n", encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        "call-1",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/sunbeam/output.log"}),
+                    ),
+                    FakeToolCall(
+                        "call-2",
+                        "get_artifact_file",
+                        json.dumps({"path": "generated/sunbeam/output.log"}),
+                    ),
+                ],
+            ),
+            FakeSdkResponse("I have enough context."),
+        ]
+    )
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=artifact_root,
+    )
+
+    tool_messages = [
+        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+    ]
+    assert "wait timed out" in tool_messages[0]["content"]
+    duplicate = json.loads(tool_messages[1]["content"])
+    assert duplicate == {
+        "duplicate_tool_call": True,
+        "ok": False,
+        "reason": "Duplicate tool call skipped; use earlier result for same arguments.",
+    }
+
+
+def test_openrouter_client_caps_tool_calls_per_round(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    generated = artifact_root / "generated"
+    generated.mkdir(parents=True)
+    for index in range(5):
+        (generated / f"{index}.log").write_text(f"log {index}\n", encoding="utf-8")
+    sdk = FakeSdkClient(
+        [
+            FakeSdkResponse(
+                "",
+                tool_calls=[
+                    FakeToolCall(
+                        f"call-{index}",
+                        "get_artifact_file",
+                        json.dumps({"path": f"generated/{index}.log"}),
+                    )
+                    for index in range(5)
+                ],
+            ),
+            FakeSdkResponse("I have enough context."),
+        ]
+    )
+
+    OpenRouterClient(_config(), sdk_client=sdk).chat(
+        "context",
+        [],
+        artifact_root=artifact_root,
+    )
+
+    tool_messages = [
+        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+    ]
+    assert "log 0" in tool_messages[0]["content"]
+    assert "log 3" in tool_messages[3]["content"]
+    capped = json.loads(tool_messages[4]["content"])
+    assert capped == {
+        "ok": False,
+        "round_tool_limit_reached": True,
+        "reason": "Tool call skipped because the per-round limit is 4.",
+    }
 
 
 def test_openrouter_client_emits_progress_for_tool_loop(tmp_path):
