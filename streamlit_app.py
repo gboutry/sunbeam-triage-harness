@@ -889,7 +889,13 @@ def _render_progress_console(events: list[dict[str, Any]], *, title: str) -> Non
             phase = contender_events[-1].get("phase", "") if contender_events else ""
             column.metric(f"Contender {contender_id}", status, phase)
 
-    rows = [
+    st.dataframe(_progress_event_rows(events), use_container_width=True, hide_index=True)
+    with st.expander("Raw progress trace"):
+        st.json(events, expanded=False)
+
+
+def _progress_event_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
         {
             "time": event.get("created_at", ""),
             "phase": event.get("phase", ""),
@@ -898,13 +904,10 @@ def _render_progress_console(events: list[dict[str, Any]], *, title: str) -> Non
             "message": event.get("message", ""),
             "tool": event.get("tool_name", ""),
             "target": event.get("target", ""),
-            "chars": event.get("result_chars", ""),
+            "chars": event.get("result_chars"),
         }
         for event in events[-25:]
     ]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    with st.expander("Raw progress trace"):
-        st.json(events, expanded=False)
 
 
 def _emit_ui_progress(

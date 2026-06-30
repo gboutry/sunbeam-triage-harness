@@ -2,6 +2,9 @@ from dataclasses import replace
 import importlib.util
 from pathlib import Path
 
+import pandas as pd
+import pyarrow as pa
+
 from sunbeam_triage.evidence import EvidenceCollector
 from sunbeam_triage.llm import DiagnosisReport, ReportEvidence
 from sunbeam_triage.probes import ProbeFinding, ProbeResult
@@ -202,6 +205,33 @@ def test_diagnosis_session_persists_progress_events(tmp_path):
     )
 
     assert session["progress_events"] == [event.to_trace()]
+
+
+def test_progress_event_rows_are_arrow_serializable():
+    app = _streamlit_app()
+    events = [
+        ProgressEvent(
+            run_id="uuid",
+            run_type="diagnosis",
+            phase="model_request",
+            status="running",
+            message="Model request sent",
+        ).to_trace(),
+        ProgressEvent(
+            run_id="uuid",
+            run_type="diagnosis",
+            phase="tool_result",
+            status="running",
+            message="Tool returned data",
+            result_chars=1234,
+        ).to_trace(),
+    ]
+
+    rows = app._progress_event_rows(events)
+
+    assert rows[0]["chars"] is None
+    assert rows[1]["chars"] == 1234
+    pa.Table.from_pandas(pd.DataFrame(rows))
 
 
 def test_diagnosis_session_persists_probe_results(tmp_path):
