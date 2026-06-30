@@ -6,6 +6,10 @@ import pytest
 
 from sunbeam_triage.core.config import Config
 from sunbeam_triage.core.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
+from sunbeam_triage.core.llm_exchanges import ExchangeRecorder
+from sunbeam_triage.core.llm_schema import DiagnosisReport as SchemaDiagnosisReport
+from sunbeam_triage.core.llm_schema import REPORT_SCHEMA as SCHEMA_REPORT_SCHEMA
+from sunbeam_triage.core.llm_transport import cache_kwargs
 from sunbeam_triage.core.triage_state import TriageLoopOptions
 
 
@@ -88,6 +92,59 @@ def _config(model="openrouter/auto"):
     config.llm.api_key = "token"
     config.llm.model = model
     return config.llm
+
+
+def test_llm_facade_reexports_schema_definitions_from_schema_module():
+    assert DiagnosisReport is SchemaDiagnosisReport
+    assert REPORT_SCHEMA is SCHEMA_REPORT_SCHEMA
+
+
+def test_exchange_recorder_exposes_existing_exchange_shape():
+    response = FakeSdkResponse("ok", usage=FakeUsage())
+    recorder = ExchangeRecorder()
+
+    recorder.record(
+        {
+            "model": "openrouter/auto",
+            "messages": [{"role": "user", "content": "context"}],
+            "session_id": "uuid-chat",
+            "response_format": {"not": "recorded"},
+        },
+        response,
+    )
+
+    assert recorder.exchanges == [
+        {
+            "request": {
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "context"}],
+                "session_id": "uuid-chat",
+            },
+            "response": {
+                "content": "ok",
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                    "prompt_tokens_details": {"cached_tokens": 75},
+                    "cache_write_tokens": 25,
+                    "cost": 0.00123,
+                    "cost_details": {
+                        "upstream_inference_prompt_cost": 0.0005,
+                        "upstream_inference_completions_cost": 0.0007,
+                    },
+                    "is_byok": False,
+                },
+            },
+        }
+    ]
+
+
+def test_transport_cache_kwargs_match_existing_model_policy():
+    assert cache_kwargs("anthropic/claude-sonnet-4") == {
+        "cache_control": {"type": "ephemeral"}
+    }
+    assert cache_kwargs("openrouter/auto") == {}
 
 
 def test_openrouter_client_requests_structured_diagnosis_with_sdk():
