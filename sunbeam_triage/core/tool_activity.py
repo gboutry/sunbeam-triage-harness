@@ -22,7 +22,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
     tool_result_chars_by_id: dict[str, int] = {}
     tool_result_count_by_id: Counter[str] = Counter()
 
-    for index, exchange in enumerate(exchanges, start=1):
+    for exchange in exchanges:
         request = exchange.get("request", {})
         messages = request.get("messages", []) if isinstance(request, dict) else []
         tool_results = [
@@ -55,24 +55,24 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
             total_tokens += int(usage.get("total_tokens") or 0)
             total_cost += _coerce_float(usage.get("cost"))
 
-        tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
+        tool_calls = (
+            response.get("tool_calls", []) if isinstance(response, dict) else []
+        )
         for call in tool_calls or []:
             tool_name, target = _tool_call_name_and_target(call)
             call_id = str(call.get("id", "")) if isinstance(call, dict) else ""
-            targets[(tool_name, target)] += 1
-            rows.append(
-                {
-                    "exchange": index,
-                    "tool_name": tool_name,
-                    "target": target,
-                    "result_count": tool_result_count_by_id[call_id],
-                    "result_chars": tool_result_chars_by_id.get(call_id, 0),
-                    "total_tokens": (
-                        usage.get("total_tokens") if isinstance(usage, dict) else None
-                    ),
-                    "cost": _coerce_float(usage.get("cost")),
-                }
-            )
+            targets[tool_name, target] += 1
+            rows.append({
+                "exchange": index,
+                "tool_name": tool_name,
+                "target": target,
+                "result_count": tool_result_count_by_id[call_id],
+                "result_chars": tool_result_chars_by_id.get(call_id, 0),
+                "total_tokens": (
+                    usage.get("total_tokens") if isinstance(usage, dict) else None
+                ),
+                "cost": _coerce_float(usage.get("cost")),
+            })
 
     repeated_reads = [
         {"tool": tool, "target": target, "count": count}

@@ -4,7 +4,6 @@ from typing import Any
 
 from .llm_exchanges import tool_call_name_and_arguments
 
-
 EVIDENCE_PRODUCING_TOOLS = {
     "search_artifacts",
     "get_artifact_file",
@@ -33,7 +32,9 @@ def exchange_range_has_evidence_tool_calls(
     exchanges: list[dict[str, Any]],
     start_index: int,
 ) -> bool:
-    return bool(exchange_range_tool_names(exchanges, start_index) & EVIDENCE_PRODUCING_TOOLS)
+    return bool(
+        exchange_range_tool_names(exchanges, start_index) & EVIDENCE_PRODUCING_TOOLS
+    )
 
 
 def exchange_range_tool_names(
@@ -81,10 +82,9 @@ def diagnosis_needs_required_tool_retry(
         start_index,
     ):
         return True
-    return (
-        diagnosis_confidence_requires_artifact_evidence(data)
-        and not exchange_range_has_evidence_tool_calls(exchanges, start_index)
-    )
+    return diagnosis_confidence_requires_artifact_evidence(
+        data
+    ) and not exchange_range_has_evidence_tool_calls(exchanges, start_index)
 
 
 def diagnosis_confidence_requires_artifact_evidence(data: dict[str, Any]) -> bool:
@@ -96,7 +96,9 @@ def downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
     if downgraded.get("confidence") == "confirmed":
         downgraded["confidence"] = "supported"
     downgraded["needs_more_evidence"] = True
-    unknowns = [str(item) for item in downgraded.get("unknowns", []) if item is not None]
+    unknowns = [
+        str(item) for item in downgraded.get("unknowns", []) if item is not None
+    ]
     budget_unknown = (
         "The artifact tool budget was exhausted before targeted artifact reads "
         "could fully validate the mechanism."

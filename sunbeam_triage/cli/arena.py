@@ -23,8 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--config", default="config.toml", help="Path to config.toml")
     run.add_argument("--models", help="Comma-separated contender model list")
     run.add_argument("--output", help="Combined arena HTML output path")
-    run.add_argument("--offline", action="store_true", help="Use already mirrored artifacts")
-    run.add_argument("--refresh", action="store_true", help="Re-download cached objects")
+    run.add_argument(
+        "--offline", action="store_true", help="Use already mirrored artifacts"
+    )
+    run.add_argument(
+        "--refresh", action="store_true", help="Re-download cached objects"
+    )
     run.add_argument(
         "--llm-json",
         action="append",
@@ -116,19 +120,17 @@ class _PrecomputedClient:
         self.exchanges: list[dict[str, Any]] = []
 
     def diagnose(self, evidence_text: str, **kwargs):
-        self.exchanges.append(
-            {
-                "request": {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": evidence_text}],
-                    "session_id": kwargs.get("session_id"),
-                },
-                "response": {
-                    "content": json.dumps(asdict(self.report), sort_keys=True),
-                    "usage": {},
-                },
-            }
-        )
+        self.exchanges.append({
+            "request": {
+                "model": self.model,
+                "messages": [{"role": "user", "content": evidence_text}],
+                "session_id": kwargs.get("session_id"),
+            },
+            "response": {
+                "content": json.dumps(asdict(self.report), sort_keys=True),
+                "usage": {},
+            },
+        })
         return self.report
 
 

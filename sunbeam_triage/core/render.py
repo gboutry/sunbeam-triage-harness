@@ -7,36 +7,34 @@ from .llm import DiagnosisReport
 
 
 def render_html(pack: EvidencePack, report: DiagnosisReport) -> str:
-    return "\n".join(
-        [
-            "<!doctype html>",
-            '<html lang="en">',
-            "<head>",
-            '<meta charset="utf-8">',
-            '<meta name="viewport" content="width=device-width, initial-scale=1">',
-            f"<title>Diagnostics: {escape(pack.uuid)}</title>",
-            "<style>",
-            CSS,
-            "</style>",
-            "</head>",
-            "<body>",
-            f"<h1>Diagnostics: {escape(pack.uuid)}</h1>",
-            _summary(pack, report),
-            _section("Failure Surface", f"<p>{escape(report.failure_surface)}</p>"),
-            _section("Root Cause", f"<p>{escape(report.root_cause)}</p>"),
-            _report_evidence(report),
-            _failure_timeline(report),
-            _cascading_errors(report),
-            _candidate_mechanisms(report),
-            _alternatives_considered(report),
-            _list_section("Recommendations", report.recommendations),
-            _list_section("Unknowns", report.unknowns),
-            _list_section("Missing Evidence", report.missing_evidence),
-            _harness_evidence(pack),
-            "</body>",
-            "</html>",
-        ]
-    )
+    return "\n".join([
+        "<!doctype html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>Diagnostics: {escape(pack.uuid)}</title>",
+        "<style>",
+        CSS,
+        "</style>",
+        "</head>",
+        "<body>",
+        f"<h1>Diagnostics: {escape(pack.uuid)}</h1>",
+        _summary(pack, report),
+        _section("Failure Surface", f"<p>{escape(report.failure_surface)}</p>"),
+        _section("Root Cause", f"<p>{escape(report.root_cause)}</p>"),
+        _report_evidence(report),
+        _failure_timeline(report),
+        _cascading_errors(report),
+        _candidate_mechanisms(report),
+        _alternatives_considered(report),
+        _list_section("Recommendations", report.recommendations),
+        _list_section("Unknowns", report.unknowns),
+        _list_section("Missing Evidence", report.missing_evidence),
+        _harness_evidence(pack),
+        "</body>",
+        "</html>",
+    ])
 
 
 def _summary(pack: EvidencePack, report: DiagnosisReport) -> str:
@@ -81,7 +79,9 @@ def _report_evidence(report: DiagnosisReport) -> str:
 
 def _candidate_mechanisms(report: DiagnosisReport) -> str:
     if not report.candidate_mechanisms:
-        return _section("Candidate Mechanisms", "<p>No candidate mechanisms returned.</p>")
+        return _section(
+            "Candidate Mechanisms", "<p>No candidate mechanisms returned.</p>"
+        )
     rows = [
         "<tr>"
         f"<td>{escape(item.name)}</td>"

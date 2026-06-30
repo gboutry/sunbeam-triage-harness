@@ -30,12 +30,10 @@ class ExchangeRecorder:
         calls = tool_calls(response)
         if calls:
             visible_response["tool_calls"] = [tool_call_dict(call) for call in calls]
-        self.exchanges.append(
-            {
-                "request": json_safe(visible_request),
-                "response": json_safe(visible_response),
-            }
-        )
+        self.exchanges.append({
+            "request": json_safe(visible_request),
+            "response": json_safe(visible_response),
+        })
 
 
 def response_content(response: Any) -> str:

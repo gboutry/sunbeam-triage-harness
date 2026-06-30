@@ -11,7 +11,11 @@ from sunbeam_triage.core.arena import ArenaOptions, ArenaRunner
 from sunbeam_triage.core.config import Config
 from sunbeam_triage.core.evidence import EvidenceCollector
 from sunbeam_triage.core.llm import DiagnosisReport, OpenRouterClient
-from sunbeam_triage.core.progress import ProgressEvent, ProgressSink, summarize_progress_events
+from sunbeam_triage.core.progress import (
+    ProgressEvent,
+    ProgressSink,
+    summarize_progress_events,
+)
 from sunbeam_triage.core.render import render_html
 from sunbeam_triage.core.sessions import (
     append_session_event,
@@ -21,7 +25,11 @@ from sunbeam_triage.core.sessions import (
 )
 from sunbeam_triage.core.swift import SwiftMirror
 from sunbeam_triage.core.tool_activity import analyze_tool_activity
-from sunbeam_triage.core.triage_state import BudgetProfile, resolve_triage_budget
+from sunbeam_triage.core.triage_state import (
+    BudgetProfile,
+    parse_budget_name,
+    resolve_triage_budget,
+)
 from sunbeam_triage.ui.helpers import (
     build_followup_context,
     evidence_line_map,
@@ -32,7 +40,6 @@ from sunbeam_triage.ui.helpers import (
     render_line_preview,
     save_ui_session,
 )
-
 
 PREVIEW_CSS = """
 <style>
@@ -133,9 +140,7 @@ def _sidebar(config: Config) -> str:
                     "type": "arena",
                     "uuid": arena_uuid.strip(),
                     "models": [
-                        item.strip()
-                        for item in arena_models.split(",")
-                        if item.strip()
+                        item.strip() for item in arena_models.split(",") if item.strip()
                     ],
                     "budget": arena_budget,
                 }
@@ -180,7 +185,6 @@ def _execute_pending_run(
     try:
         if pending.get("type") == "diagnosis":
             _start_diagnosis(
-                config,
                 str(pending.get("uuid", "")),
                 str(pending.get("model", config.llm.model)),
                 str(pending.get("budget", "default")),
@@ -265,7 +269,7 @@ def _start_arena(
         )
         session = ArenaRunner(config).run(
             uuid,
-            ArenaOptions(models=models, budget=budget),
+            ArenaOptions(models=models, budget=parse_budget_name(budget)),
             progress=progress,
         )
         session["progress_events"] = list(progress_events or [])
@@ -299,7 +303,10 @@ def _retry_failed_arena(
     models = [str(item.get("model", "")) for item in arena.get("contenders", [])]
     updated = ArenaRunner(config).retry_failed(
         arena,
-        ArenaOptions(models=models, budget=str(arena.get("budget", "default"))),
+        ArenaOptions(
+            models=models,
+            budget=parse_budget_name(str(arena.get("budget", "default"))),
+        ),
         progress=progress,
     )
     updated["progress_events"] = [
@@ -315,7 +322,6 @@ def _retry_failed_arena(
 
 
 def _start_diagnosis(
-    config: Config,
     uuid: str,
     model: str,
     budget: str,
@@ -337,7 +343,7 @@ def _start_diagnosis(
             min_evidence_items=run_config.triage.min_evidence_items,
             max_tool_result_chars=run_config.triage.max_tool_result_chars,
         ),
-        budget=budget,
+        budget=parse_budget_name(budget),
     )
     artifact_root = run_config.paths.artifact_root / uuid
     llm_client = OpenRouterClient(run_config.llm)
@@ -367,7 +373,9 @@ def _start_diagnosis(
                 warning=str(event["error"]) if event.get("error") else None,
             )
 
-        manifest = SwiftMirror(run_config.swift, run_config.paths.artifact_root).mirror_uuid(
+        manifest = SwiftMirror(
+            run_config.swift, run_config.paths.artifact_root
+        ).mirror_uuid(
             uuid,
             progress=show_download,
             continue_on_error=True,
@@ -572,12 +580,10 @@ def _send_followup(
         progress=progress,
     )
 
-    session.setdefault("chat", []).extend(
-        [
-            {"role": "user", "content": prompt, "created_at": _now()},
-            {"role": "assistant", "content": answer, "created_at": _now()},
-        ]
-    )
+    session.setdefault("chat", []).extend([
+        {"role": "user", "content": prompt, "created_at": _now()},
+        {"role": "assistant", "content": answer, "created_at": _now()},
+    ])
     session.setdefault("exchanges", []).extend(llm_client.exchanges)
     session.setdefault("progress_events", []).extend(progress_events or [])
     session["updated_at"] = _now()
@@ -592,9 +598,15 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         with tabs[0]:
             _render_arena_tab(config)
         return
-    tabs = st.tabs(
-        ["Evidence", "Probes", "Files", "Tool Activity", "Progress", "API", "Arenas"]
-    )
+    tabs = st.tabs([
+        "Evidence",
+        "Probes",
+        "Files",
+        "Tool Activity",
+        "Progress",
+        "API",
+        "Arenas",
+    ])
     with tabs[0]:
         _render_evidence_tab(session)
     with tabs[1]:
@@ -643,17 +655,12 @@ def _failure_timeline_rows(
             continue
         source = str(item.get("source", "")).strip()
         location = str(item.get("location", "")).strip()
-        if source and location:
-            source = f"{source}: {location}"
-        else:
-            source = source or location
-        rows.append(
-            {
-                "time": str(item.get("timestamp", "")).strip(),
-                "source": source,
-                "event": str(item.get("event", "")).strip(),
-            }
-        )
+        source = f"{source}: {location}" if source and location else source or location
+        rows.append({
+            "time": str(item.get("timestamp", "")).strip(),
+            "source": source,
+            "event": str(item.get("event", "")).strip(),
+        })
     return rows
 
 
@@ -662,13 +669,11 @@ def _candidate_mechanism_rows(session: dict[str, Any]) -> list[dict[str, str]]:
     for item in session.get("candidate_mechanisms", []):
         if not isinstance(item, dict):
             continue
-        rows.append(
-            {
-                "mechanism": str(item.get("name", "")).strip(),
-                "status": str(item.get("status", "")).strip(),
-                "rationale": str(item.get("rationale", "")).strip(),
-            }
-        )
+        rows.append({
+            "mechanism": str(item.get("name", "")).strip(),
+            "status": str(item.get("status", "")).strip(),
+            "rationale": str(item.get("rationale", "")).strip(),
+        })
     return rows
 
 
@@ -712,13 +717,17 @@ def _render_arena_tab(config: Config) -> None:
             st.markdown("**Root Cause**")
             st.write(report.get("root_cause", ""))
             st.caption(f"Confidence: {report.get('confidence', '')}")
-    if any(contender.get("status") == "failed" for contender in arena.get("contenders", [])):
-        if st.button("Retry failed contenders", key=f"retry-arena-{arena['session_id']}"):
-            st.session_state["pending_run"] = {
-                "type": "arena_retry",
-                "session_id": arena["session_id"],
-            }
-            st.rerun()
+    if any(
+        contender.get("status") == "failed" for contender in arena.get("contenders", [])
+    ) and st.button(
+        "Retry failed contenders",
+        key=f"retry-arena-{arena['session_id']}",
+    ):
+        st.session_state["pending_run"] = {
+            "type": "arena_retry",
+            "session_id": arena["session_id"],
+        }
+        st.rerun()
     _render_arena_verdict_form(config, arena)
 
 
@@ -842,13 +851,11 @@ def _render_evidence_tab(session: dict[str, Any]) -> None:
         label = _format_attachment(item)
         st.code(item.get("excerpt", ""), language=None)
         if st.button(f"Attach {label}", key=f"attach-evidence-{index}"):
-            _add_attachment(
-                {
-                    "path": item.get("path", ""),
-                    "line": item.get("line"),
-                    "text": item.get("excerpt", ""),
-                }
-            )
+            _add_attachment({
+                "path": item.get("path", ""),
+                "line": item.get("line"),
+                "text": item.get("excerpt", ""),
+            })
             st.rerun()
 
 
@@ -866,16 +873,14 @@ def _render_probe_tab(session: dict[str, Any]) -> None:
         for finding in result.get("findings", []):
             if not isinstance(finding, dict):
                 continue
-            rows.append(
-                {
-                    "probe": result.get("name", ""),
-                    "status": result.get("status", ""),
-                    "category": finding.get("category", ""),
-                    "path": finding.get("path", ""),
-                    "line": finding.get("line", ""),
-                    "excerpt": finding.get("excerpt", ""),
-                }
-            )
+            rows.append({
+                "probe": result.get("name", ""),
+                "status": result.get("status", ""),
+                "category": finding.get("category", ""),
+                "path": finding.get("path", ""),
+                "line": finding.get("line", ""),
+                "excerpt": finding.get("excerpt", ""),
+            })
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
     for result in probe_results:
@@ -892,13 +897,11 @@ def _render_probe_tab(session: dict[str, Any]) -> None:
                 f"Attach probe {label}",
                 key=f"attach-probe-{result.get('name', '')}-{index}",
             ):
-                _add_attachment(
-                    {
-                        "path": finding.get("path", ""),
-                        "line": finding.get("line"),
-                        "text": finding.get("excerpt", ""),
-                    }
-                )
+                _add_attachment({
+                    "path": finding.get("path", ""),
+                    "line": finding.get("line"),
+                    "text": finding.get("excerpt", ""),
+                })
                 st.rerun()
         missing = result.get("missing_evidence", [])
         if missing:
@@ -925,9 +928,7 @@ def _render_tool_activity_tab(session: dict[str, Any]) -> None:
 
 def _render_saved_progress_tab(session: dict[str, Any]) -> None:
     events = [
-        event
-        for event in session.get("progress_events", [])
-        if isinstance(event, dict)
+        event for event in session.get("progress_events", []) if isinstance(event, dict)
     ]
     if not events:
         st.info("No progress trace recorded for this session.")
@@ -951,20 +952,24 @@ def _render_progress_console(events: list[dict[str, Any]], *, title: str) -> Non
         return
 
     arena_events = [event for event in events if event.get("run_type") == "arena"]
-    contenders = sorted(
-        {
-            str(event.get("contender_id"))
-            for event in arena_events
-            if event.get("contender_id")
-        }
-    )
+    contenders = sorted({
+        str(event.get("contender_id"))
+        for event in arena_events
+        if event.get("contender_id")
+    })
     if contenders:
         columns = st.columns(len(contenders))
         for column, contender_id in zip(columns, contenders, strict=False):
             contender_events = [
-                event for event in arena_events if event.get("contender_id") == contender_id
+                event
+                for event in arena_events
+                if event.get("contender_id") == contender_id
             ]
-            status = contender_events[-1].get("status", "queued") if contender_events else "queued"
+            status = (
+                contender_events[-1].get("status", "queued")
+                if contender_events
+                else "queued"
+            )
             phase = contender_events[-1].get("phase", "") if contender_events else ""
             column.metric(f"Contender {contender_id}", status, phase)
 
@@ -1014,7 +1019,9 @@ def _emit_ui_progress(
 
 
 def _render_files_tab(config: Config, session: dict[str, Any]) -> None:
-    root = Path(session.get("artifact_root", config.paths.artifact_root / session["uuid"]))
+    root = Path(
+        session.get("artifact_root", config.paths.artifact_root / session["uuid"])
+    )
     files = list_artifact_files(root)
     if not files:
         st.info(f"No downloaded files found under `{root}`.")
@@ -1039,13 +1046,11 @@ def _render_files_tab(config: Config, session: dict[str, Any]) -> None:
         if st.button("Attach highlighted lines"):
             for line_number in sorted(highlights):
                 line_text = _line_at(preview.text, line_number)
-                _add_attachment(
-                    {
-                        "path": selected.as_posix(),
-                        "line": line_number,
-                        "text": line_text,
-                    }
-                )
+                _add_attachment({
+                    "path": selected.as_posix(),
+                    "line": line_number,
+                    "text": line_text,
+                })
             st.rerun()
     st.markdown(PREVIEW_CSS, unsafe_allow_html=True)
     st.markdown(render_line_preview(preview.text, highlights), unsafe_allow_html=True)
@@ -1125,25 +1130,23 @@ def _persist_diagnosis_session(
 
 
 def _report_from_session(session: dict[str, Any]) -> DiagnosisReport:
-    return DiagnosisReport.from_dict(
-        {
-            "summary": session.get("summary", ""),
-            "failure_surface": session.get("failure_surface", ""),
-            "confidence": session.get("confidence", "unknown"),
-            "root_cause": session.get("root_cause", ""),
-            "needs_more_evidence": session.get("needs_more_evidence", False),
-            "evidence": session.get("evidence", []),
-            "candidate_mechanisms": session.get("candidate_mechanisms", []),
-            "recommendations": session.get("recommendations", []),
-            "unknowns": session.get("unknowns", []),
-            "triage_confidence": session.get("triage_confidence", "unknown"),
-            "failure_timeline": session.get("failure_timeline", []),
-            "cascading_errors": session.get("cascading_errors", []),
-            "alternatives_considered": session.get("alternatives_considered", []),
-            "missing_evidence": session.get("missing_evidence", []),
-            "stop_reason": session.get("stop_reason", ""),
-        }
-    )
+    return DiagnosisReport.from_dict({
+        "summary": session.get("summary", ""),
+        "failure_surface": session.get("failure_surface", ""),
+        "confidence": session.get("confidence", "unknown"),
+        "root_cause": session.get("root_cause", ""),
+        "needs_more_evidence": session.get("needs_more_evidence", False),
+        "evidence": session.get("evidence", []),
+        "candidate_mechanisms": session.get("candidate_mechanisms", []),
+        "recommendations": session.get("recommendations", []),
+        "unknowns": session.get("unknowns", []),
+        "triage_confidence": session.get("triage_confidence", "unknown"),
+        "failure_timeline": session.get("failure_timeline", []),
+        "cascading_errors": session.get("cascading_errors", []),
+        "alternatives_considered": session.get("alternatives_considered", []),
+        "missing_evidence": session.get("missing_evidence", []),
+        "stop_reason": session.get("stop_reason", ""),
+    })
 
 
 def _format_attachment(item: dict[str, Any]) -> str:

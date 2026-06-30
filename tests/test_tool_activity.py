@@ -60,8 +60,7 @@ def test_analyze_tool_activity_summarizes_tool_rounds_and_warnings():
                         {
                             "role": "user",
                             "content": (
-                                "The artifact tool budget is exhausted. "
-                                "Answer now."
+                                "The artifact tool budget is exhausted. Answer now."
                             ),
                         }
                     ]

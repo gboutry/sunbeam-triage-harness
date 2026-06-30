@@ -4,8 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal
-
+from typing import Any, Literal, cast
 
 BudgetName = Literal["quick", "default", "hard"]
 
@@ -64,9 +63,7 @@ class InvestigationState:
     def apply_observation(self, observation: ToolObservation) -> None:
         made_progress = False
         observation_key = (
-            f"{observation.tool_name}:"
-            f"{observation.args_key}:"
-            f"{observation.result_key}"
+            f"{observation.tool_name}:{observation.args_key}:{observation.result_key}"
         )
         if observation_key not in self._seen_observations:
             self._seen_observations.add(observation_key)
@@ -83,14 +80,12 @@ class InvestigationState:
                 self.missing_evidence.append(missing)
 
         if observation.timestamp_count and made_progress:
-            self.failure_timeline.append(
-                {
-                    "timestamp": "observed",
-                    "source": observation.tool_name,
-                    "location": "",
-                    "event": "Tool result included timestamped evidence.",
-                }
-            )
+            self.failure_timeline.append({
+                "timestamp": "observed",
+                "source": observation.tool_name,
+                "location": "",
+                "event": "Tool result included timestamped evidence.",
+            })
 
         if made_progress:
             self.stall_count = 0
@@ -169,6 +164,12 @@ def resolve_triage_budget(
     )
 
 
+def parse_budget_name(value: str) -> BudgetName:
+    if value in {"quick", "default", "hard"}:
+        return cast("BudgetName", value)
+    raise ValueError(f"Unknown triage budget profile: {value}")
+
+
 def observe_tool_result(
     tool_name: str,
     arguments: dict[str, Any],
@@ -179,7 +180,7 @@ def observe_tool_result(
     return ToolObservation(
         tool_name=tool_name,
         args_key=_stable_hash(arguments),
-        result_key=_stable_hash(result if result else content),
+        result_key=_stable_hash(result or content),
         evidence_keys=evidence_keys,
         timestamp_count=len(_TIMESTAMP_RE.findall(content)),
         truncated=bool(result.get("tool_result_truncated_by_budget")),
@@ -243,14 +244,18 @@ def _missing_evidence(
     if result.get("duplicate_tool_call"):
         missing.append("Duplicate tool call skipped; earlier result should be reused.")
     if result.get("round_tool_limit_reached"):
-        missing.append("Tool call skipped because the per-round tool limit was reached.")
+        missing.append(
+            "Tool call skipped because the per-round tool limit was reached."
+        )
     if (
         tool_name in {"search_artifacts", "search_sosreport"}
         and result.get("ok") is True
         and result.get("matches") == []
     ):
         pattern = str(arguments.get("pattern", ""))
-        target = str(arguments.get("path_prefix") or arguments.get("archive_path") or "")
+        target = str(
+            arguments.get("path_prefix") or arguments.get("archive_path") or ""
+        )
         missing.append(f"No matches found for targeted search {pattern!r} in {target}.")
     return missing
 

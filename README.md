@@ -44,6 +44,7 @@ uv run sunbeam-triage-cli <uuid> --output /tmp/diagnostics-{uuid}.html
 uv sync --dev
 uv run pytest -q
 uv run python -m compileall -q sunbeam_triage tests
+uv run pre-commit run --all-files
 ```
 
 Run the Streamlit cockpit with:

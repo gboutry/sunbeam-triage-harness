@@ -5,7 +5,6 @@ import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-
 K8S_NOT_READY = re.compile(
     r"Application 'k8s' is not ready|k8s.*wait timed out|wait timed out.*k8s",
     re.IGNORECASE,
@@ -15,7 +14,9 @@ STATUS_SIGNAL = re.compile(
     re.IGNORECASE,
 )
 STATUS_MESSAGE = re.compile(r"message='([^']+)'")
-K8S_STATUS_MESSAGE = re.compile(r"Unready Pods|Waiting for Cluster token", re.IGNORECASE)
+K8S_STATUS_MESSAGE = re.compile(
+    r"Unready Pods|Waiting for Cluster token", re.IGNORECASE
+)
 K8S_READY_SIGNAL = re.compile(r"\bk8s(?:/\d+)?\b.*\b(active|Ready)\b", re.IGNORECASE)
 NODE_READY_SIGNAL = re.compile(r"\bReady\b", re.IGNORECASE)
 POD_READY_SIGNAL = re.compile(r"\bcoredns\b.*\bRunning\b", re.IGNORECASE)
@@ -228,7 +229,7 @@ def _later_convergence_findings(root: Path) -> list[ProbeFinding]:
 
 
 def _is_later_convergence_line(rel: str, line: str) -> bool:
-    if not line or line.startswith("NAME ") or line.startswith("NAMESPACE "):
+    if not line or line.startswith(("NAME ", "NAMESPACE ")):
         return False
     if rel.endswith("kubectl_get_pod.txt"):
         return bool(POD_READY_SIGNAL.search(line))
@@ -294,7 +295,10 @@ def _journal_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
         if not member.isfile():
             continue
         normalized = _normalized_member_path(member.name)
-        if normalized == "sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s":
+        if (
+            normalized
+            == "sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s"
+        ):
             members.append(member)
         elif normalized == "sos_commands/logs/journalctl_--no-pager_--boot":
             fallback.append(member)
@@ -339,8 +343,10 @@ def _run_juju_lost_unit_probe(root: Path) -> ProbeResult:
         summary="Juju unit-agent/leader loss is a primary failure-surface candidate.",
         findings=findings[:20],
         missing_evidence=[
-            "Need juju show-status-log k8s/0 or unit-k8s-0 agent logs to "
-            "confirm why Juju marked the unit lost."
+            (
+                "Need juju show-status-log k8s/0 or unit-k8s-0 agent logs to "
+                "confirm why Juju marked the unit lost."
+            )
         ],
     )
 
@@ -353,10 +359,16 @@ def _run_juju_migration_probe(root: Path) -> ProbeResult:
     findings: list[ProbeFinding] = []
     failed_findings: list[ProbeFinding] = []
     for rel in rels:
-        findings.extend(_text_file_findings(root, rel, MIGRATION_SIGNAL, "migration_event"))
-        findings.extend(_text_file_findings(root, rel, K8S_UNIT_LIFECYCLE, "unit_lifecycle"))
+        findings.extend(
+            _text_file_findings(root, rel, MIGRATION_SIGNAL, "migration_event")
+        )
+        findings.extend(
+            _text_file_findings(root, rel, K8S_UNIT_LIFECYCLE, "unit_lifecycle")
+        )
         failed_findings.extend(
-            _text_file_findings(root, rel, FAILED_MIGRATION_SIGNAL, "failed_migration_signal")
+            _text_file_findings(
+                root, rel, FAILED_MIGRATION_SIGNAL, "failed_migration_signal"
+            )
         )
     if failed_findings:
         findings.extend(failed_findings)
@@ -372,9 +384,11 @@ def _run_juju_migration_probe(root: Path) -> ProbeResult:
     else:
         summary = "Juju migration lifecycle was observed; failure is unconfirmed."
         missing = [
-            "No direct failed-migration evidence found; look for invalid "
-            "entity/password or stale agent.conf evidence before confirming "
-            "migration failure."
+            (
+                "No direct failed-migration evidence found; look for invalid "
+                "entity/password or stale agent.conf evidence before confirming "
+                "migration failure."
+            )
         ]
     return ProbeResult(
         name="juju_migration",
@@ -411,7 +425,9 @@ def _run_workload_crash_recovery_probe(root: Path) -> ProbeResult:
                 for line_number, line in enumerate(text.splitlines(), start=1):
                     stripped = line.strip()
                     path = f"{archive_rel}:{normalized}"
-                    if normalized == "var/log/apport.log" and K8SD_CRASH.search(stripped):
+                    if normalized == "var/log/apport.log" and K8SD_CRASH.search(
+                        stripped
+                    ):
                         line_time = _line_time_seconds(stripped)
                         if line_time is not None:
                             crash_times.append(line_time)
@@ -424,17 +440,15 @@ def _run_workload_crash_recovery_probe(root: Path) -> ProbeResult:
                             )
                         )
                     elif K8SD_RECOVERY.search(stripped):
-                        recovery_candidates.append(
-                            (
-                                ProbeFinding(
-                                    category="recovery_counterevidence",
-                                    path=path,
-                                    line=line_number,
-                                    excerpt=_excerpt(stripped),
-                                ),
-                                _line_time_seconds(stripped),
-                            )
-                        )
+                        recovery_candidates.append((
+                            ProbeFinding(
+                                category="recovery_counterevidence",
+                                path=path,
+                                line=line_number,
+                                excerpt=_excerpt(stripped),
+                            ),
+                            _line_time_seconds(stripped),
+                        ))
                     if len(crash_findings) >= 4 and len(recovery_candidates) >= 8:
                         break
     if not crash_findings:
@@ -450,17 +464,23 @@ def _run_workload_crash_recovery_probe(root: Path) -> ProbeResult:
         if recovery_time is None or crash_time is None or recovery_time >= crash_time
     ]
     if recovery_findings:
-        summary = "k8sd crash evidence was found, and recovery counter-evidence was found."
+        summary = (
+            "k8sd crash evidence was found, and recovery counter-evidence was found."
+        )
     else:
-        summary = "k8sd crash evidence was found; recovery counter-evidence was not found."
+        summary = (
+            "k8sd crash evidence was found; recovery counter-evidence was not found."
+        )
     return ProbeResult(
         name="workload_crash_recovery",
         status="triggered",
         summary=summary,
         findings=[*crash_findings[:4], *recovery_findings[:8]],
         missing_evidence=[
-            "A workload crash is not sufficient evidence for Juju unit lost "
-            "without unit-agent or status-log evidence connecting the events."
+            (
+                "A workload crash is not sufficient evidence for Juju unit lost "
+                "without unit-agent or status-log evidence connecting the events."
+            )
         ],
     )
 
@@ -534,8 +554,11 @@ def _host_from_archive_name(name: str) -> str:
 def _journal_dedupe_key(line: str) -> str:
     line = re.sub(r"^[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\S+\s+", "", line)
     line = re.sub(r"\[\d+\]", "[]", line)
-    line = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", "<ts>", line)
-    return line
+    return re.sub(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z",
+        "<ts>",
+        line,
+    )
 
 
 def _line_time_seconds(line: str) -> int | None:

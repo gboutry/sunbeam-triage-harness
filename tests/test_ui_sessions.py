@@ -1,5 +1,5 @@
-from dataclasses import replace
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +9,7 @@ from sunbeam_triage.core.evidence import EvidenceCollector
 from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
 from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.core.progress import ProgressEvent
+from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
 from sunbeam_triage.ui.helpers import (
     build_followup_context,
     list_saved_sessions,
@@ -16,7 +17,6 @@ from sunbeam_triage.ui.helpers import (
     save_ui_session,
     session_store_root,
 )
-from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
 
 
 def _streamlit_app():
@@ -79,7 +79,9 @@ def test_load_ui_session_returns_none_for_missing_uuid(tmp_path):
 
 
 def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
-    pack = EvidenceCollector(Path("tests/fixtures/sample_uuid"), "sample-uuid").collect()
+    pack = EvidenceCollector(
+        Path("tests/fixtures/sample_uuid"), "sample-uuid"
+    ).collect()
     report = DiagnosisReport(
         summary="Timed out",
         failure_surface="Deploy timeout",
@@ -117,7 +119,9 @@ def test_build_followup_context_includes_diagnosis_evidence_and_attachments():
 
 
 def test_build_followup_context_includes_deterministic_probe_findings():
-    pack = EvidenceCollector(Path("tests/fixtures/sample_uuid"), "sample-uuid").collect()
+    pack = EvidenceCollector(
+        Path("tests/fixtures/sample_uuid"), "sample-uuid"
+    ).collect()
     pack = replace(
         pack,
         probe_results=(
@@ -376,39 +380,37 @@ def test_append_progress_event_records_concise_trace():
 
 def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
     app = _streamlit_app()
-    report = DiagnosisReport.from_dict(
-        {
-            "summary": "Timed out",
-            "failure_surface": "Deploy timeout",
-            "confidence": "supported",
-            "root_cause": "RabbitMQ closed first.",
-            "triage_confidence": "medium",
-            "failure_timeline": [
-                {
-                    "timestamp": "10:42:29",
-                    "source": "rabbitmq.log",
-                    "location": "line 120",
-                    "event": "RabbitMQ closed AMQP connection.",
-                }
-            ],
-            "cascading_errors": [
-                {
-                    "path": "nova-api.log",
-                    "line": 1242,
-                    "excerpt": "oslo.messaging timeout",
-                }
-            ],
-            "alternatives_considered": [
-                {
-                    "hypothesis": "Database outage",
-                    "status": "less_likely",
-                    "reason": "No DB errors near first failure timestamp.",
-                }
-            ],
-            "missing_evidence": ["Need neutron-server timing."],
-            "stop_reason": "sufficient_evidence",
-        }
-    )
+    report = DiagnosisReport.from_dict({
+        "summary": "Timed out",
+        "failure_surface": "Deploy timeout",
+        "confidence": "supported",
+        "root_cause": "RabbitMQ closed first.",
+        "triage_confidence": "medium",
+        "failure_timeline": [
+            {
+                "timestamp": "10:42:29",
+                "source": "rabbitmq.log",
+                "location": "line 120",
+                "event": "RabbitMQ closed AMQP connection.",
+            }
+        ],
+        "cascading_errors": [
+            {
+                "path": "nova-api.log",
+                "line": 1242,
+                "excerpt": "oslo.messaging timeout",
+            }
+        ],
+        "alternatives_considered": [
+            {
+                "hypothesis": "Database outage",
+                "status": "less_likely",
+                "reason": "No DB errors near first failure timestamp.",
+            }
+        ],
+        "missing_evidence": ["Need neutron-server timing."],
+        "stop_reason": "sufficient_evidence",
+    })
 
     session = app._session_from_diagnosis(
         uuid="uuid",
@@ -435,7 +437,10 @@ def test_arena_contender_label_hides_model_until_verdict():
     contender = {"contender_id": "A", "model": "model/a"}
 
     assert app._arena_contender_label(contender, reveal_model=False) == "Contender A"
-    assert app._arena_contender_label(contender, reveal_model=True) == "Contender A - model/a"
+    assert (
+        app._arena_contender_label(contender, reveal_model=True)
+        == "Contender A - model/a"
+    )
 
 
 def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tmp_path):
@@ -457,7 +462,9 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
             ],
         },
     )
-    session = load_session_record(artifact_root, "arena-sample")["snapshot"]
+    record = load_session_record(artifact_root, "arena-sample")
+    assert record is not None
+    session = record["snapshot"]
 
     updated = app._save_arena_verdict(
         artifact_root,
@@ -484,6 +491,7 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
 
     loaded = load_session_record(artifact_root, "arena-sample")
     assert updated["status"] == "judged"
+    assert loaded is not None
     assert loaded["snapshot"]["verdict"]["winner"] == "B"
     assert [event["event"] for event in loaded["events"]] == ["arena_verdict_saved"]
     assert load_ui_session(artifact_root, "sample-uuid") is None
@@ -505,6 +513,7 @@ def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
 
     assert load_ui_session(artifact_root, "sample-uuid") == session
     loaded = load_session_record(artifact_root, "sample-uuid")
+    assert loaded is not None
     assert loaded["snapshot"]["schema_version"] == 2
     assert loaded["snapshot"]["session_type"] == "diagnosis"
     assert loaded["snapshot"]["summary"] == "Diagnosis summary"

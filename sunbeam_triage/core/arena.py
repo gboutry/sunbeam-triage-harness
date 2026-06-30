@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import string
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
@@ -12,13 +14,18 @@ from .llm import OpenRouterClient
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .sessions import append_session_event, save_session_snapshot
 from .tool_activity import analyze_tool_activity
-from .triage_state import BudgetProfile, TriageLoopOptions, resolve_triage_budget
+from .triage_state import (
+    BudgetName,
+    BudgetProfile,
+    TriageLoopOptions,
+    resolve_triage_budget,
+)
 
 
 @dataclass(frozen=True)
 class ArenaOptions:
     models: list[str]
-    budget: str = "default"
+    budget: BudgetName = "default"
     max_tool_rounds: int | None = None
     triage_options: TriageLoopOptions | None = None
     output: str | Path | None = None
@@ -82,7 +89,12 @@ class ArenaRunner:
         append_session_event(
             self.config.paths.artifact_root,
             session_id,
-            {"event": "arena_started", "created_at": now, "uuid": uuid, "models": models},
+            {
+                "event": "arena_started",
+                "created_at": now,
+                "uuid": uuid,
+                "models": models,
+            },
         )
 
         for index, model in enumerate(models):
@@ -167,7 +179,11 @@ class ArenaRunner:
             else "failed"
         )
         session["summary"] = _arena_summary(session)
-        output = Path(options.output) if options.output else _arena_output_path(uuid, session_id)
+        output = (
+            Path(options.output)
+            if options.output
+            else _arena_output_path(uuid, session_id)
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(render_arena_html(session), encoding="utf-8")
         session["output"] = str(output)
@@ -270,9 +286,7 @@ class ArenaRunner:
             else "failed"
         )
         updated["summary"] = _arena_summary(updated)
-        output = Path(
-            updated.get("output") or _arena_output_path(uuid, session_id)
-        )
+        output = Path(updated.get("output") or _arena_output_path(uuid, session_id))
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(render_arena_html(updated), encoding="utf-8")
         updated["output"] = str(output)
@@ -367,16 +381,12 @@ class ArenaRunner:
             "report": asdict(report),
             "exchanges": list(getattr(client, "exchanges", [])),
         }
-        contender["tool_activity"] = analyze_tool_activity(
-            {
-                "uuid": contender_session_id,
-                "model": model,
-                "exchanges": contender["exchanges"],
-            }
-        )
-        contender["trace_path"] = (
-            f".sunbeam-triage/sessions/{session_id}.json"
-        )
+        contender["tool_activity"] = analyze_tool_activity({
+            "uuid": contender_session_id,
+            "model": model,
+            "exchanges": contender["exchanges"],
+        })
+        contender["trace_path"] = f".sunbeam-triage/sessions/{session_id}.json"
         return contender
 
 
@@ -405,8 +415,10 @@ def render_arena_html(session: dict[str, Any]) -> str:
             f"<p>{escape(str(verdict.get('notes', '')))}</p></section>"
         )
     body.append("<section><h2>Contenders</h2>")
-    for contender in session.get("contenders", []):
-        body.append(_contender_html(contender, reveal_models=reveal_models))
+    body.extend(
+        _contender_html(contender, reveal_models=reveal_models)
+        for contender in session.get("contenders", [])
+    )
     body.extend(["</section>", "</body>", "</html>"])
     return "\n".join(body)
 
@@ -419,22 +431,24 @@ def _contender_html(contender: dict[str, Any], *, reveal_models: bool) -> str:
     report = contender.get("report", {})
     if not isinstance(report, dict):
         report = {}
-    return "\n".join(
-        [
-            '<article class="contender">',
-            f"<h3>{escape(title)}</h3>",
-            f"<p>Status: {escape(str(contender.get('status', '')))}</p>",
-            f"<p><strong>Summary:</strong> {escape(str(report.get('summary', '')))}</p>",
+    return "\n".join([
+        '<article class="contender">',
+        f"<h3>{escape(title)}</h3>",
+        f"<p>Status: {escape(str(contender.get('status', '')))}</p>",
+        f"<p><strong>Summary:</strong> {escape(str(report.get('summary', '')))}</p>",
+        (
             f"<p><strong>Root cause:</strong> "
-            f"{escape(str(report.get('root_cause', '')))}</p>",
+            f"{escape(str(report.get('root_cause', '')))}</p>"
+        ),
+        (
             f"<p><strong>Confidence:</strong> "
-            f"{escape(str(report.get('confidence', '')))}</p>",
-            f"<p>{escape(str(contender.get('error', '')))}</p>"
-            if contender.get("error")
-            else "",
-            "</article>",
-        ]
-    )
+            f"{escape(str(report.get('confidence', '')))}</p>"
+        ),
+        f"<p>{escape(str(contender.get('error', '')))}</p>"
+        if contender.get("error")
+        else "",
+        "</article>",
+    ])
 
 
 def _resolve_triage_options(config: Config, options: ArenaOptions) -> TriageLoopOptions:
@@ -467,7 +481,7 @@ def _normalize_models(models: list[str]) -> list[str]:
 
 
 def _contender_id(index: int) -> str:
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    alphabet = string.ascii_uppercase
     if index < len(alphabet):
         return alphabet[index]
     return f"M{index + 1}"
@@ -483,7 +497,9 @@ def _arena_output_path(uuid: str, session_id: str) -> Path:
 
 def _arena_summary(session: dict[str, Any]) -> str:
     completed = sum(
-        1 for contender in session["contenders"] if contender.get("status") == "completed"
+        1
+        for contender in session["contenders"]
+        if contender.get("status") == "completed"
     )
     return f"{completed}/{len(session['contenders'])} contenders completed"
 

@@ -23,13 +23,11 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
 def test_k8s_not_ready_probe_extracts_output_status_and_later_convergence(tmp_path):
     _write_output(
         tmp_path,
-        "\n".join(
-            [
-                "Jun 29 17:00:16 snorlax stderr:",
-                "Application 'k8s' is not ready: TimeoutError('wait timed out')",
-                "message='Unready Pods: kube-system/coredns-a, kube-system/coredns-b'",
-            ]
-        ),
+        "\n".join([
+            "Jun 29 17:00:16 snorlax stderr:",
+            "Application 'k8s' is not ready: TimeoutError('wait timed out')",
+            "message='Unready Pods: kube-system/coredns-a, kube-system/coredns-b'",
+        ]),
     )
     _write(
         tmp_path,
@@ -51,7 +49,10 @@ def test_k8s_not_ready_probe_extracts_output_status_and_later_convergence(tmp_pa
     result = run_preflight_probes(tmp_path, "uuid")[0]
 
     assert result.status == "triggered"
-    assert result.summary == "K8s readiness timeout probe collected deterministic evidence."
+    assert (
+        result.summary
+        == "K8s readiness timeout probe collected deterministic evidence."
+    )
     assert any(finding.category == "failure_surface" for finding in result.findings)
     assert any("Unready Pods" in finding.excerpt for finding in result.findings)
     assert any(finding.category == "later_convergence" for finding in result.findings)
@@ -97,11 +98,15 @@ def test_k8s_not_ready_probe_reads_bounded_matching_sosreport_journals(tmp_path)
     result = run_preflight_probes(tmp_path, "uuid")[0]
 
     journal_findings = [
-        finding for finding in result.findings if finding.category == "sosreport_journal"
+        finding
+        for finding in result.findings
+        if finding.category == "sosreport_journal"
     ]
     assert len(journal_findings) == 2
     assert all("sosreport-snorlax" in finding.path for finding in journal_findings)
-    assert any("cni plugin not initialized" in finding.excerpt for finding in journal_findings)
+    assert any(
+        "cni plugin not initialized" in finding.excerpt for finding in journal_findings
+    )
 
 
 def test_k8s_not_ready_probe_infers_host_from_nearby_failed_join_command(tmp_path):
@@ -124,8 +129,7 @@ def test_k8s_not_ready_probe_infers_host_from_nearby_failed_join_command(tmp_pat
         {
             "sosreport-chespin-2026-06-29-abcd/"
             "sos_commands/kubernetes/journalctl_--no-pager_--unit_snap.k8s": (
-                "Jun 29 17:04:17 chespin k8s.k8sd[1]: "
-                "Failed to watch configmap\n"
+                "Jun 29 17:04:17 chespin k8s.k8sd[1]: Failed to watch configmap\n"
             )
         },
     )
@@ -163,7 +167,9 @@ def test_k8s_not_ready_probe_deduplicates_repeated_journal_messages(tmp_path):
     result = run_preflight_probes(tmp_path, "uuid")[0]
 
     journal_findings = [
-        finding for finding in result.findings if finding.category == "sosreport_journal"
+        finding
+        for finding in result.findings
+        if finding.category == "sosreport_journal"
     ]
     assert len(journal_findings) == 1
     assert "Failed to watch configmap" in journal_findings[0].excerpt
@@ -192,7 +198,9 @@ def test_juju_lost_unit_probe_extracts_lost_unit_and_missing_leader(tmp_path):
     assert "Juju unit-agent/leader loss" in result.summary
     assert any(finding.category == "final_status" for finding in result.findings)
     assert any(finding.category == "missing_leader" for finding in result.findings)
-    assert any(finding.category == "control_plane_unknown" for finding in result.findings)
+    assert any(
+        finding.category == "control_plane_unknown" for finding in result.findings
+    )
     assert any("juju show-status-log k8s/0" in item for item in result.missing_evidence)
 
 
@@ -200,14 +208,12 @@ def test_juju_migration_probe_separates_observed_from_failed_migration(tmp_path)
     _write(
         tmp_path,
         "generated/sunbeam/juju_debug_log_openstack-machines.txt",
-        "\n".join(
-            [
-                "15:06:43 INFO migration phase is now QUIESCE",
-                "15:07:07 INFO migration phase is now SUCCESS",
-                '15:07:07 INFO juju.worker.deployer stopped "k8s/0", err: <nil>',
-                '15:07:07 INFO juju.worker.deployer start "unit-k8s-0"',
-            ]
-        ),
+        "\n".join([
+            "15:06:43 INFO migration phase is now QUIESCE",
+            "15:07:07 INFO migration phase is now SUCCESS",
+            '15:07:07 INFO juju.worker.deployer stopped "k8s/0", err: <nil>',
+            '15:07:07 INFO juju.worker.deployer start "unit-k8s-0"',
+        ]),
     )
 
     result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "juju_migration")
@@ -216,7 +222,10 @@ def test_juju_migration_probe_separates_observed_from_failed_migration(tmp_path)
     assert "observed; failure is unconfirmed" in result.summary
     assert any(finding.category == "migration_event" for finding in result.findings)
     assert any(finding.category == "unit_lifecycle" for finding in result.findings)
-    assert any("No direct failed-migration evidence" in item for item in result.missing_evidence)
+    assert any(
+        "No direct failed-migration evidence" in item
+        for item in result.missing_evidence
+    )
 
 
 def test_workload_crash_recovery_probe_records_crash_and_recovery_counterevidence(
@@ -230,7 +239,7 @@ def test_workload_crash_recovery_probe_records_crash_and_recovery_counterevidenc
                 "INFO: apport 2026-06-29 17:37:44,365: called for global pid "
                 "22844, signal 11\n"
                 "INFO: apport 2026-06-29 17:37:44,367: executable: "
-                "/snap/k8s/5279/bin/k8s (command line \"/snap/k8s/5279/bin/k8sd\")\n"
+                '/snap/k8s/5279/bin/k8s (command line "/snap/k8s/5279/bin/k8sd")\n'
             ),
             "sosreport-node1-2026-06-29-abcd/"
             "sos_commands/systemd/systemctl_list-units": (
@@ -254,7 +263,9 @@ def test_workload_crash_recovery_probe_records_crash_and_recovery_counterevidenc
     assert result.status == "triggered"
     assert "counter-evidence was found" in result.summary
     assert any(finding.category == "workload_crash" for finding in result.findings)
-    assert any(finding.category == "recovery_counterevidence" for finding in result.findings)
+    assert any(
+        finding.category == "recovery_counterevidence" for finding in result.findings
+    )
     assert not any("15:21:55" in finding.excerpt for finding in result.findings)
     assert any(
         "not sufficient evidence for Juju unit lost" in item

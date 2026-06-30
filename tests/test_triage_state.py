@@ -5,6 +5,7 @@ from sunbeam_triage.core.triage_state import (
     InvestigationState,
     TriageLoopOptions,
     observe_tool_result,
+    parse_budget_name,
     resolve_triage_budget,
 )
 
@@ -29,6 +30,17 @@ def test_resolve_triage_budget_rejects_rounds_above_hard_limit():
         raise AssertionError("expected ValueError")
 
 
+def test_parse_budget_name_rejects_unknown_profile():
+    assert parse_budget_name("quick") == "quick"
+
+    try:
+        parse_budget_name("surprise")
+    except ValueError as exc:
+        assert "Unknown triage budget profile" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_investigation_state_stops_after_sufficient_independent_evidence():
     options = TriageLoopOptions(max_rounds=12, hard_max_rounds=20)
     state = InvestigationState(options=options)
@@ -37,41 +49,35 @@ def test_investigation_state_stops_after_sufficient_independent_evidence():
         observe_tool_result(
             "search_artifacts",
             {"pattern": "first error"},
-            json.dumps(
-                {
-                    "ok": True,
-                    "matches": [
-                        {
-                            "path": "nova-api.log",
-                            "line": 1242,
-                            "excerpt": "10:42:31 oslo.messaging timeout",
-                        }
-                    ],
-                }
-            ),
+            json.dumps({
+                "ok": True,
+                "matches": [
+                    {
+                        "path": "nova-api.log",
+                        "line": 1242,
+                        "excerpt": "10:42:31 oslo.messaging timeout",
+                    }
+                ],
+            }),
         )
     )
     state.apply_observation(
         observe_tool_result(
             "get_artifact_file",
             {"path": "rabbitmq.log", "line_start": 120, "line_count": 20},
-            json.dumps(
-                {
-                    "ok": True,
-                    "path": "rabbitmq.log",
-                    "line_start": 120,
-                    "content": "10:42:29 closing AMQP connection\n",
-                }
-            ),
+            json.dumps({
+                "ok": True,
+                "path": "rabbitmq.log",
+                "line_start": 120,
+                "content": "10:42:29 closing AMQP connection\n",
+            }),
         )
     )
-    state.alternatives_considered.append(
-        {
-            "hypothesis": "Database outage",
-            "status": "less_likely",
-            "reason": "No DB errors near the first failure timestamp.",
-        }
-    )
+    state.alternatives_considered.append({
+        "hypothesis": "Database outage",
+        "status": "less_likely",
+        "reason": "No DB errors near the first failure timestamp.",
+    })
 
     assert state.should_finalize() is True
     assert state.stop_reason == "sufficient_evidence"
@@ -115,36 +121,32 @@ def test_empty_targeted_search_records_missing_evidence_and_allows_finalization(
         observe_tool_result(
             "search_artifacts",
             {"pattern": "k8s/0.*lost"},
-            json.dumps(
-                {
-                    "ok": True,
-                    "matches": [
-                        {
-                            "path": "generated/sunbeam/status.txt",
-                            "line": 10,
-                            "excerpt": "k8s/0 unknown lost agent lost",
-                        },
-                    ],
-                }
-            ),
+            json.dumps({
+                "ok": True,
+                "matches": [
+                    {
+                        "path": "generated/sunbeam/status.txt",
+                        "line": 10,
+                        "excerpt": "k8s/0 unknown lost agent lost",
+                    },
+                ],
+            }),
         )
     )
     state.apply_observation(
         observe_tool_result(
             "search_sosreport",
             {"archive_path": "sosreport.tar.xz", "pattern": "juju.*unit-k8s"},
-            json.dumps(
-                {
-                    "ok": True,
-                    "matches": [
-                        {
-                            "path": "var/log/juju/unit-k8s-0.log",
-                            "line": 22,
-                            "excerpt": "unit-k8s-0 successfully connected",
-                        },
-                    ],
-                }
-            ),
+            json.dumps({
+                "ok": True,
+                "matches": [
+                    {
+                        "path": "var/log/juju/unit-k8s-0.log",
+                        "line": 22,
+                        "excerpt": "unit-k8s-0 successfully connected",
+                    },
+                ],
+            }),
         )
     )
     state.apply_observation(
@@ -169,13 +171,11 @@ def test_truncated_result_counts_as_missing_evidence_and_non_progress():
         observe_tool_result(
             "get_artifact_file",
             {"path": "generated/sunbeam/output.log"},
-            json.dumps(
-                {
-                    "ok": False,
-                    "tool_result_truncated_by_budget": True,
-                    "error": "Tool result exceeded budget; narrow the request.",
-                }
-            ),
+            json.dumps({
+                "ok": False,
+                "tool_result_truncated_by_budget": True,
+                "error": "Tool result exceeded budget; narrow the request.",
+            }),
         )
     )
 

@@ -11,7 +11,9 @@ from sunbeam_triage.core.render import render_html
 
 
 def test_render_html_escapes_content_and_includes_sections():
-    pack = EvidenceCollector(Path("tests/fixtures/sample_uuid"), "sample-uuid").collect()
+    pack = EvidenceCollector(
+        Path("tests/fixtures/sample_uuid"), "sample-uuid"
+    ).collect()
     report = DiagnosisReport(
         summary="Timed out <bad>",
         failure_surface="cluster resize timeout",
@@ -39,7 +41,9 @@ def test_render_html_escapes_content_and_includes_sections():
 
 
 def test_render_html_includes_triage_v2_sections():
-    pack = EvidenceCollector(Path("tests/fixtures/sample_uuid"), "sample-uuid").collect()
+    pack = EvidenceCollector(
+        Path("tests/fixtures/sample_uuid"), "sample-uuid"
+    ).collect()
     report = DiagnosisReport(
         summary="Timed out",
         failure_surface="Deploy timeout",

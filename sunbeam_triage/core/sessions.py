@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,7 @@ def list_session_records(artifact_root: Path) -> list[dict[str, Any]]:
         legacy = json.loads(path.read_text(encoding="utf-8"))
         snapshot = _legacy_snapshot(path.stem, legacy)
         records[path.stem] = _session_summary(snapshot)
-    return sorted(records.values(), key=lambda item: item["updated_at"], reverse=True)
+    return sorted(records.values(), key=itemgetter("updated_at"), reverse=True)
 
 
 def export_judged_arenas(artifact_root: Path, output: Path) -> int:
@@ -130,11 +131,11 @@ def _arena_export_record(snapshot: dict[str, Any]) -> dict[str, Any]:
 def _read_events(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    events = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            events.append(json.loads(line))
-    return events
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _snapshot_path(artifact_root: Path, session_id: str) -> Path:

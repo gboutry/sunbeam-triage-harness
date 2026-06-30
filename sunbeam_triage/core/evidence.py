@@ -8,7 +8,6 @@ from typing import Any
 
 from .probes import ProbeResult, run_preflight_probes
 
-
 CLEANUP_STEP_NAMES = {
     "Collect logs",
     "log_collection",
@@ -192,7 +191,9 @@ class EvidenceCollector:
     def _collect_evidence(self, failed: FailedStep) -> list[EvidenceItem]:
         evidence: list[EvidenceItem] = []
         if failed.family == "sunbeam":
-            evidence.extend(self._scan_log("generated/sunbeam/output.log", "sunbeam-output"))
+            evidence.extend(
+                self._scan_log("generated/sunbeam/output.log", "sunbeam-output")
+            )
             evidence.extend(
                 self._summarize_status(
                     "generated/sunbeam/juju_status_openstack.txt", "juju-status"
@@ -231,8 +232,7 @@ class EvidenceCollector:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         for number, line in enumerate(lines, start=1):
             if (
-                not ERROR_PATTERNS.search(line)
-                and not SECRET_ASSIGNMENT.search(line)
+                not ERROR_PATTERNS.search(line) and not SECRET_ASSIGNMENT.search(line)
             ) or NOISE_PATTERNS.search(line):
                 continue
             items.append(
@@ -286,6 +286,5 @@ def _probe_prompt_lines(probe_results: tuple[ProbeResult, ...]) -> list[str]:
             lines.append(
                 f"  - [{finding.category}] {finding.path}{line}: {finding.excerpt}"
             )
-        for missing in result.missing_evidence:
-            lines.append(f"  - [missing] {missing}")
+        lines.extend(f"  - [missing] {missing}" for missing in result.missing_evidence)
     return lines

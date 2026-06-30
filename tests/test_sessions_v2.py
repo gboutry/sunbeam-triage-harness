@@ -1,11 +1,10 @@
 import json
-from pathlib import Path
 
 from sunbeam_triage.core.sessions import (
     append_session_event,
     export_judged_arenas,
-    load_session_record,
     list_session_records,
+    load_session_record,
     save_session_snapshot,
 )
 from sunbeam_triage.ui.helpers import save_ui_session
@@ -51,6 +50,7 @@ def test_v2_session_snapshot_and_events_round_trip(tmp_path):
         / "sessions"
         / "arena-sample-uuid-20260630T120000Z.json"
     )
+    assert loaded is not None
     assert loaded["snapshot"] == snapshot
     assert [event["event"] for event in loaded["events"]] == [
         "arena_started",
@@ -92,6 +92,7 @@ def test_session_listing_reads_v2_and_legacy_without_rewriting_legacy(tmp_path):
     ]
     assert records[0]["schema_version"] == 2
     assert records[1]["schema_version"] == 1
+    assert loaded_legacy is not None
     assert loaded_legacy["snapshot"]["summary"] == "Legacy diagnosis"
     assert legacy_path.exists()
     assert json.loads(legacy_path.read_text(encoding="utf-8")) == legacy

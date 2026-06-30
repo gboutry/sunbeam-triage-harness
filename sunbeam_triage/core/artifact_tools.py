@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,6 @@ from .sosreport_tools import (
     list_sosreports,
     search_sosreport,
 )
-
 
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
@@ -289,7 +289,7 @@ def _list_artifact_files(root: Path) -> dict[str, Any]:
         if _is_internal_path(relative):
             continue
         files.append({"path": relative.as_posix(), "size_bytes": path.stat().st_size})
-    return {"ok": True, "files": sorted(files, key=lambda item: item["path"])}
+    return {"ok": True, "files": sorted(files, key=itemgetter("path"))}
 
 
 def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +341,9 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
     }
     if line_start is not None:
         result["line_start"] = line_start
-        result["line_count"] = line_count if line_count is not None else len(text.splitlines())
+        result["line_count"] = (
+            line_count if line_count is not None else len(text.splitlines())
+        )
     return result
 
 
@@ -378,13 +380,11 @@ def _search_artifacts(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
                 if len(matches) >= limit:
                     truncated = True
                     break
-                matches.append(
-                    {
-                        "path": rel_posix,
-                        "line": line_number,
-                        "excerpt": _search_excerpt(line),
-                    }
-                )
+                matches.append({
+                    "path": rel_posix,
+                    "line": line_number,
+                    "excerpt": _search_excerpt(line),
+                })
         if truncated:
             break
     return {"ok": True, "matches": matches, "truncated": truncated}

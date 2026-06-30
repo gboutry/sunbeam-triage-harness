@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Callable
-
+from typing import Any
 
 ProgressSink = Callable[["ProgressEvent"], None]
 
@@ -88,18 +88,23 @@ def event_from_tool_call(
     )
 
 
-def summarize_progress_events(events: list[ProgressEvent | dict[str, Any]]) -> dict[str, Any]:
-    traces = [event.to_trace() if isinstance(event, ProgressEvent) else event for event in events]
-    warnings = sorted(
-        {
-            str(event.get("warning"))
-            for event in traces
-            if isinstance(event, dict) and event.get("warning")
-        }
-    )
+def summarize_progress_events(
+    events: Sequence[ProgressEvent | dict[str, Any]],
+) -> dict[str, Any]:
+    traces = [
+        event.to_trace() if isinstance(event, ProgressEvent) else event
+        for event in events
+    ]
+    warnings = sorted({
+        str(event.get("warning"))
+        for event in traces
+        if isinstance(event, dict) and event.get("warning")
+    })
     return {
         "event_count": len(traces),
-        "tool_call_count": sum(1 for event in traces if event.get("phase") == "tool_call"),
+        "tool_call_count": sum(
+            1 for event in traces if event.get("phase") == "tool_call"
+        ),
         "tool_result_count": sum(
             1 for event in traces if event.get("phase") == "tool_result"
         ),

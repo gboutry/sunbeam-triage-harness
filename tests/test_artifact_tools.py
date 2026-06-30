@@ -36,9 +36,7 @@ def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):
     (root / "generated/github-runner/jobs.json").write_text("{}", encoding="utf-8")
     (root / ".sunbeam-triage-manifest.json").write_text("[]", encoding="utf-8")
     (root / ".sunbeam-triage-ui/sessions").mkdir(parents=True)
-    (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text("{}", encoding="utf-8")
 
     result = execute_artifact_tool(root, "list_artifact_files", {})
 

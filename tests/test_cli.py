@@ -20,18 +20,16 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
         encoding="utf-8",
     )
 
-    llm_json = json.dumps(
-        {
-            "summary": "Offline summary",
-            "failure_surface": "sunbeam_deploy failed",
-            "confidence": "supported",
-            "root_cause": "Timeout",
-            "evidence": [],
-            "candidate_mechanisms": [],
-            "recommendations": [],
-            "unknowns": [],
-        }
-    )
+    llm_json = json.dumps({
+        "summary": "Offline summary",
+        "failure_surface": "sunbeam_deploy failed",
+        "confidence": "supported",
+        "root_cause": "Timeout",
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    })
     result = subprocess.run(
         [
             sys.executable,
@@ -73,18 +71,16 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
 """.strip(),
         encoding="utf-8",
     )
-    llm_json = json.dumps(
-        {
-            "summary": "Offline summary",
-            "failure_surface": "sunbeam_deploy failed",
-            "confidence": "supported",
-            "root_cause": "Timeout",
-            "evidence": [],
-            "candidate_mechanisms": [],
-            "recommendations": [],
-            "unknowns": [],
-        }
-    )
+    llm_json = json.dumps({
+        "summary": "Offline summary",
+        "failure_surface": "sunbeam_deploy failed",
+        "confidence": "supported",
+        "root_cause": "Timeout",
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    })
 
     result = subprocess.run(
         [
@@ -107,7 +103,10 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
     assert "[model] configured/test-model" in result.stderr
     assert "[stage] mirror skipped (offline)" in result.stderr
     assert "[stage] evidence" in result.stderr
-    assert "[result] failed_step=sunbeam_deploy family=sunbeam evidence_items=" in result.stderr
+    assert (
+        "[result] failed_step=sunbeam_deploy family=sunbeam evidence_items="
+        in result.stderr
+    )
     assert "[stage] diagnosis using supplied JSON" in result.stderr
     assert "[result] confidence=supported summary=Offline summary" in result.stderr
     assert "[stage] render" in result.stderr

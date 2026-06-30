@@ -52,13 +52,13 @@ class DiagnosisReport:
     stop_reason: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DiagnosisReport":
+    def from_dict(cls, data: dict[str, Any]) -> DiagnosisReport:
         return cls(
             summary=str(data.get("summary", "")),
             failure_surface=str(data.get("failure_surface", "")),
             confidence=str(data.get("confidence", "speculative")),
             root_cause=str(data.get("root_cause", "")),
-            needs_more_evidence=bool(data.get("needs_more_evidence", False)),
+            needs_more_evidence=bool(data.get("needs_more_evidence")),
             evidence=[
                 ReportEvidence(
                     path=str(item.get("path", "")),
@@ -78,9 +78,13 @@ class DiagnosisReport:
                 if isinstance(item, dict)
             ],
             recommendations=[
-                str(item) for item in data.get("recommendations", []) if item is not None
+                str(item)
+                for item in data.get("recommendations", [])
+                if item is not None
             ],
-            unknowns=[str(item) for item in data.get("unknowns", []) if item is not None],
+            unknowns=[
+                str(item) for item in data.get("unknowns", []) if item is not None
+            ],
             triage_confidence=str(data.get("triage_confidence", "unknown")),
             failure_timeline=[
                 TimelineEvent(
@@ -111,13 +115,15 @@ class DiagnosisReport:
                 if isinstance(item, dict)
             ],
             missing_evidence=[
-                str(item) for item in data.get("missing_evidence", []) if item is not None
+                str(item)
+                for item in data.get("missing_evidence", [])
+                if item is not None
             ],
             stop_reason=str(data.get("stop_reason", "")),
         )
 
 
-REPORT_SCHEMA = {
+REPORT_SCHEMA: dict[str, Any] = {
     "name": "sunbeam_ci_diagnosis",
     "strict": True,
     "schema": {
@@ -172,7 +178,12 @@ REPORT_SCHEMA = {
                         "name": {"type": "string"},
                         "status": {
                             "type": "string",
-                            "enum": ["confirmed", "supported", "speculative", "rejected"],
+                            "enum": [
+                                "confirmed",
+                                "supported",
+                                "speculative",
+                                "rejected",
+                            ],
                         },
                         "rationale": {"type": "string"},
                     },

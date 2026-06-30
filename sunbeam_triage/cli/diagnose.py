@@ -19,7 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", help="Output HTML path or pattern")
     parser.add_argument("--artifact-root", help="Local artifact cache root")
     parser.add_argument("--model", help="OpenRouter model override")
-    parser.add_argument("--refresh", action="store_true", help="Re-download cached objects")
+    parser.add_argument(
+        "--refresh", action="store_true", help="Re-download cached objects"
+    )
     parser.add_argument(
         "--offline",
         action="store_true",

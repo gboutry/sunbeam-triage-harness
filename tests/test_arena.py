@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from sunbeam_triage.core.arena import ArenaOptions, ArenaRunner, render_arena_html
@@ -15,7 +14,10 @@ class FakeArenaClient:
         self.error = error
         self.exchanges = [
             {
-                "request": {"model": model, "messages": [{"role": "user", "content": ""}]},
+                "request": {
+                    "model": model,
+                    "messages": [{"role": "user", "content": ""}],
+                },
                 "response": {"usage": {"total_tokens": 12, "cost": 0.001}},
             }
         ]
@@ -33,8 +35,7 @@ class FakeClientFactory:
         self.clients = {}
 
     def __call__(self, llm_config):
-        client = self.clients[llm_config.model]
-        return client
+        return self.clients[llm_config.model]
 
 
 def _config(tmp_path):
@@ -112,6 +113,7 @@ def test_arena_runner_executes_models_sequentially_with_isolated_sessions(tmp_pa
     assert first_call["triage_options"].max_rounds == 1
 
     loaded = load_session_record(config.paths.artifact_root, session["session_id"])
+    assert loaded is not None
     assert loaded["snapshot"]["session_id"] == session["session_id"]
     assert [event["event"] for event in loaded["events"]] == [
         "arena_started",
@@ -241,6 +243,7 @@ def test_arena_runner_persists_partial_failures(tmp_path):
     assert session["contenders"][1]["status"] == "failed"
     assert session["contenders"][1]["error"] == "model exploded"
     loaded = load_session_record(config.paths.artifact_root, session["session_id"])
+    assert loaded is not None
     assert loaded["snapshot"]["status"] == "completed_with_errors"
 
 

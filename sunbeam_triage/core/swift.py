@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Callable
+from typing import TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
+
+from typing_extensions import override
 
 from .config import SwiftConfig
 from .http import UrlLibHttp
@@ -36,6 +39,12 @@ class MirrorManifest:
     failures: tuple[SwiftDownloadFailure, ...] = ()
 
 
+class SwiftListingItem(TypedDict):
+    name: str
+    hash: str | None
+    bytes: int
+
+
 class SwiftMirror:
     def __init__(self, swift_config: SwiftConfig, artifact_root: Path, http=None):
         self.swift_config = swift_config
@@ -47,7 +56,7 @@ class SwiftMirror:
         uuid: str,
         *,
         refresh: bool = False,
-        progress: Callable[[dict], None] | None = None,
+        progress: Callable[[dict[str, object]], None] | None = None,
         continue_on_error: bool = False,
     ) -> MirrorManifest:
         try:
@@ -150,7 +159,7 @@ class SwiftMirror:
             failures=tuple(failures),
         )
 
-    def _list(self, uuid: str) -> list[dict]:
+    def _list(self, uuid: str) -> list[SwiftListingItem]:
         url = f"{self.swift_config.base_url}/{quote(uuid, safe='')}/index.html"
         html = self.http.get_text(url)
         return [
@@ -178,7 +187,7 @@ class SwiftMirror:
 
 
 def _emit_progress(
-    progress: Callable[[dict], None] | None,
+    progress: Callable[[dict[str, object]], None] | None,
     *,
     index: int,
     total: int,
@@ -190,7 +199,7 @@ def _emit_progress(
 ) -> None:
     if progress is None:
         return
-    event = {
+    event: dict[str, object] = {
         "index": index,
         "total": total,
         "name": name,
@@ -208,6 +217,7 @@ class _IndexLinkParser(HTMLParser):
         super().__init__()
         self.hrefs: list[str] = []
 
+    @override
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.lower() != "a":
             return

@@ -4,13 +4,13 @@ import copy
 import json
 from dataclasses import dataclass
 from html import escape
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
 from ..core.evidence import EvidencePack
 from ..core.llm import DiagnosisReport
 from ..core.sessions import SESSION_DIR_NAME
-
 
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
 
@@ -27,18 +27,18 @@ class CapturingHttp:
         self.wrapped = wrapped
         self.exchanges: list[dict[str, Any]] = []
 
-    def post_json(self, url: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+    def post_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str]
+    ) -> Any:
         response = self.wrapped.post_json(url, payload, headers)
-        self.exchanges.append(
-            {
-                "url": url,
-                "request": {
-                    "payload": copy.deepcopy(payload),
-                    "headers": _redact_headers(headers),
-                },
-                "response": copy.deepcopy(response),
-            }
-        )
+        self.exchanges.append({
+            "url": url,
+            "request": {
+                "payload": copy.deepcopy(payload),
+                "headers": _redact_headers(headers),
+            },
+            "response": copy.deepcopy(response),
+        })
         return response
 
 
@@ -77,7 +77,7 @@ def render_line_preview(text: str, highlighted_lines: set[int]) -> str:
     for number, line in enumerate(text.splitlines(), start=1):
         class_attr = ' class="evidence-line"' if number in highlighted_lines else ""
         rows.append(
-            f"<tr{class_attr} data-line=\"{number}\">"
+            f'<tr{class_attr} data-line="{number}">'
             f'<td class="line-number">{number}</td>'
             f'<td class="line-text"><code>{escape(line)}</code></td>'
             "</tr>"
@@ -110,17 +110,15 @@ def list_saved_sessions(artifact_root: Path) -> list[dict[str, Any]]:
     for path in sessions_dir.glob("*.json"):
         session = json.loads(path.read_text(encoding="utf-8"))
         chat = session.get("chat", [])
-        summaries.append(
-            {
-                "uuid": str(session.get("uuid", path.stem)),
-                "model": str(session.get("model", "")),
-                "summary": str(session.get("summary", "")),
-                "confidence": str(session.get("confidence", "")),
-                "updated_at": str(session.get("updated_at", "")),
-                "chat_count": len(chat) if isinstance(chat, list) else 0,
-            }
-        )
-    return sorted(summaries, key=lambda item: item["updated_at"], reverse=True)
+        summaries.append({
+            "uuid": str(session.get("uuid", path.stem)),
+            "model": str(session.get("model", "")),
+            "summary": str(session.get("summary", "")),
+            "confidence": str(session.get("confidence", "")),
+            "updated_at": str(session.get("updated_at", "")),
+            "chat_count": len(chat) if isinstance(chat, list) else 0,
+        })
+    return sorted(summaries, key=itemgetter("updated_at"), reverse=True)
 
 
 def build_followup_context(
@@ -164,10 +162,7 @@ def build_followup_context(
     if report.failure_timeline:
         parts.extend(["", "Failure Timeline:"])
         parts.extend(
-            (
-                f"- {item.timestamp} {item.source} {item.location}: "
-                f"{item.event}"
-            )
+            (f"- {item.timestamp} {item.source} {item.location}: {item.event}")
             for item in report.failure_timeline
         )
     if report.cascading_errors:
@@ -203,8 +198,7 @@ def _probe_context_lines(pack: EvidencePack) -> list[str]:
             lines.append(
                 f"  - [{finding.category}] {finding.path}{line}: {finding.excerpt}"
             )
-        for missing in result.missing_evidence:
-            lines.append(f"  - [missing] {missing}")
+        lines.extend(f"  - [missing] {missing}" for missing in result.missing_evidence)
     return lines
 
 

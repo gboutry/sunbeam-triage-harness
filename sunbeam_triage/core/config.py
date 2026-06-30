@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_SWIFT_BASE_URL = (
     "https://radosgw.ps7.canonical.com/swift/v1/"
     "AUTH_86bac34f174b4ae59994bd51884a9c53/solutions-qa"
@@ -65,7 +64,7 @@ class Config:
         cli_model: str | None = None,
         cli_output: str | Path | None = None,
         cli_artifact_root: str | Path | None = None,
-    ) -> "Config":
+    ) -> Config:
         config = cls()
         data: dict[str, Any] = {}
         if path:
@@ -74,7 +73,9 @@ class Config:
                 data = tomllib.loads(path.read_text(encoding="utf-8"))
 
         swift = data.get("swift", {})
-        config.swift.base_url = str(swift.get("base_url", config.swift.base_url)).rstrip("/")
+        config.swift.base_url = str(
+            swift.get("base_url", config.swift.base_url)
+        ).rstrip("/")
         config.swift.timeout_seconds = int(
             swift.get("timeout_seconds", config.swift.timeout_seconds)
         )

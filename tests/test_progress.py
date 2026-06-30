@@ -46,8 +46,7 @@ def test_event_from_tool_call_extracts_tool_target():
             "function": {
                 "name": "get_sosreport_file",
                 "arguments": (
-                    '{"archive_path": "sos.tar.xz", '
-                    '"member_path": "var/log/syslog"}'
+                    '{"archive_path": "sos.tar.xz", "member_path": "var/log/syslog"}'
                 ),
             },
         },
@@ -64,37 +63,35 @@ def test_event_from_tool_call_extracts_tool_target():
 
 
 def test_summarize_progress_events_counts_activity():
-    summary = summarize_progress_events(
-        [
-            ProgressEvent(
-                run_id="uuid-1",
-                run_type="diagnosis",
-                phase="model_request",
-                status="running",
-                message="Querying model",
-            ),
-            ProgressEvent(
-                run_id="uuid-1",
-                run_type="diagnosis",
-                phase="tool_result",
-                status="running",
-                message="Tool returned data",
-                result_chars=50,
-                total_tokens=10,
-                total_cost=0.01,
-            ),
-            ProgressEvent(
-                run_id="uuid-1",
-                run_type="diagnosis",
-                phase="tool_result",
-                status="running",
-                message="Tool returned more data",
-                result_chars=70,
-                total_tokens=20,
-                total_cost=0.02,
-            ),
-        ]
-    )
+    summary = summarize_progress_events([
+        ProgressEvent(
+            run_id="uuid-1",
+            run_type="diagnosis",
+            phase="model_request",
+            status="running",
+            message="Querying model",
+        ),
+        ProgressEvent(
+            run_id="uuid-1",
+            run_type="diagnosis",
+            phase="tool_result",
+            status="running",
+            message="Tool returned data",
+            result_chars=50,
+            total_tokens=10,
+            total_cost=0.01,
+        ),
+        ProgressEvent(
+            run_id="uuid-1",
+            run_type="diagnosis",
+            phase="tool_result",
+            status="running",
+            message="Tool returned more data",
+            result_chars=70,
+            total_tokens=20,
+            total_cost=0.02,
+        ),
+    ])
 
     assert summary == {
         "event_count": 3,

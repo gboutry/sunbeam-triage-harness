@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 import tarfile
+from operator import itemgetter
 from pathlib import Path, PurePosixPath
 from typing import Any
-
 
 DEFAULT_LIST_LIMIT = 200
 DEFAULT_SEARCH_LIMIT = 50
@@ -19,13 +19,11 @@ def list_sosreports(root: Path) -> dict[str, Any]:
         if not path.is_file() or path.name.endswith(".sha256"):
             continue
         relative = path.relative_to(root).as_posix()
-        archives.append(
-            {
-                "path": relative,
-                "host": _host_from_archive_name(path.name),
-                "size_bytes": path.stat().st_size,
-            }
-        )
+        archives.append({
+            "path": relative,
+            "host": _host_from_archive_name(path.name),
+            "size_bytes": path.stat().st_size,
+        })
     return {"ok": True, "archives": archives}
 
 
@@ -45,7 +43,7 @@ def list_sosreport_files(root: Path, arguments: dict[str, Any]) -> dict[str, Any
             if prefix and not normalized.startswith(prefix):
                 continue
             files.append({"path": normalized, "size_bytes": member.size})
-    files = sorted(files, key=lambda item: item["path"])
+    files = sorted(files, key=itemgetter("path"))
     return {
         "ok": True,
         "archive_path": archive_ref["relative"],
@@ -92,13 +90,11 @@ def search_sosreport(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
                     if len(matches) >= limit:
                         truncated = True
                         break
-                    matches.append(
-                        {
-                            "path": normalized,
-                            "line": line_number,
-                            "excerpt": line.strip(),
-                        }
-                    )
+                    matches.append({
+                        "path": normalized,
+                        "line": line_number,
+                        "excerpt": line.strip(),
+                    })
             if truncated:
                 break
     return {
@@ -172,7 +168,9 @@ def get_sosreport_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
     }
     if line_start is not None:
         result["line_start"] = line_start
-        result["line_count"] = line_count if line_count is not None else len(text.splitlines())
+        result["line_count"] = (
+            line_count if line_count is not None else len(text.splitlines())
+        )
     return result
 
 

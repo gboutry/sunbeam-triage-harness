@@ -6,18 +6,16 @@ from pathlib import Path
 
 
 def _report(summary):
-    return json.dumps(
-        {
-            "summary": summary,
-            "failure_surface": "Deploy timeout",
-            "confidence": "supported",
-            "root_cause": "Timeout",
-            "evidence": [],
-            "candidate_mechanisms": [],
-            "recommendations": [],
-            "unknowns": [],
-        }
-    )
+    return json.dumps({
+        "summary": summary,
+        "failure_surface": "Deploy timeout",
+        "confidence": "supported",
+        "root_cause": "Timeout",
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": [],
+    })
 
 
 def test_arena_cli_run_uses_config_models_and_writes_report(tmp_path):
@@ -117,33 +115,31 @@ def test_arena_cli_export_writes_judged_jsonl(tmp_path):
     session_dir = artifact_root / ".sunbeam-triage" / "sessions"
     session_dir.mkdir(parents=True)
     (session_dir / "arena.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "session_id": "arena",
-                "session_type": "arena",
-                "uuid": "sample-uuid",
-                "updated_at": "2026-06-30T12:00:00Z",
-                "status": "judged",
-                "contenders": [
-                    {
-                        "contender_id": "A",
-                        "model": "model/a",
-                        "report": {"summary": "A summary"},
-                    },
-                    {
-                        "contender_id": "B",
-                        "model": "model/b",
-                        "report": {"summary": "B summary"},
-                    },
-                ],
-                "verdict": {
-                    "winner": "A",
-                    "notes": "A wins",
-                    "rubric": {"A": {"root_cause": 5}},
+        json.dumps({
+            "schema_version": 2,
+            "session_id": "arena",
+            "session_type": "arena",
+            "uuid": "sample-uuid",
+            "updated_at": "2026-06-30T12:00:00Z",
+            "status": "judged",
+            "contenders": [
+                {
+                    "contender_id": "A",
+                    "model": "model/a",
+                    "report": {"summary": "A summary"},
                 },
-            }
-        ),
+                {
+                    "contender_id": "B",
+                    "model": "model/b",
+                    "report": {"summary": "B summary"},
+                },
+            ],
+            "verdict": {
+                "winner": "A",
+                "notes": "A wins",
+                "rubric": {"A": {"root_cause": 5}},
+            },
+        }),
         encoding="utf-8",
     )
     output = tmp_path / "export.jsonl"

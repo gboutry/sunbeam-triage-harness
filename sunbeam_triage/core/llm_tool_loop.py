@@ -35,7 +35,6 @@ from .triage_state import (
     resolve_triage_budget,
 )
 
-
 TOOL_RESULT_TRUNCATED_MARKER = json.dumps(
     {"tool_result_truncated_by_budget": True},
     sort_keys=True,
@@ -156,7 +155,9 @@ class ArtifactToolLoop:
             for tool_call, message in zip(calls, tool_result_messages, strict=False):
                 name, arguments = tool_call_name_and_arguments(tool_call)
                 state.apply_observation(
-                    observe_tool_result(name, arguments, str(message.get("content", "")))
+                    observe_tool_result(
+                        name, arguments, str(message.get("content", ""))
+                    )
                 )
             request["messages"] = [
                 *request["messages"],

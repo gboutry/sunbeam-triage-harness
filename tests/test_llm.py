@@ -5,10 +5,10 @@ import tarfile
 import pytest
 
 from sunbeam_triage.core.config import Config
-from sunbeam_triage.core.llm import DiagnosisReport, OpenRouterClient, REPORT_SCHEMA
+from sunbeam_triage.core.llm import REPORT_SCHEMA, DiagnosisReport, OpenRouterClient
 from sunbeam_triage.core.llm_exchanges import ExchangeRecorder
-from sunbeam_triage.core.llm_schema import DiagnosisReport as SchemaDiagnosisReport
 from sunbeam_triage.core.llm_schema import REPORT_SCHEMA as SCHEMA_REPORT_SCHEMA
+from sunbeam_triage.core.llm_schema import DiagnosisReport as SchemaDiagnosisReport
 from sunbeam_triage.core.llm_transport import cache_kwargs
 from sunbeam_triage.core.triage_state import TriageLoopOptions
 
@@ -149,24 +149,22 @@ def test_transport_cache_kwargs_match_existing_model_policy():
 
 def test_openrouter_client_requests_structured_diagnosis_with_sdk():
     response = FakeSdkResponse(
-        json.dumps(
-            {
-                "summary": "The deploy step timed out.",
-                "failure_surface": "sunbeam cluster resize timed out.",
-                "confidence": "supported",
-                "root_cause": "Readiness did not converge before timeout.",
-                "evidence": [
-                    {
-                        "path": "generated/sunbeam/output.log",
-                        "line": 2,
-                        "excerpt": "wait timed out",
-                    }
-                ],
-                "candidate_mechanisms": [],
-                "recommendations": ["Inspect readiness gate."],
-                "unknowns": ["No remote CLI completion log found."],
-            }
-        ),
+        json.dumps({
+            "summary": "The deploy step timed out.",
+            "failure_surface": "sunbeam cluster resize timed out.",
+            "confidence": "supported",
+            "root_cause": "Readiness did not converge before timeout.",
+            "evidence": [
+                {
+                    "path": "generated/sunbeam/output.log",
+                    "line": 2,
+                    "excerpt": "wait timed out",
+                }
+            ],
+            "candidate_mechanisms": [],
+            "recommendations": ["Inspect readiness gate."],
+            "unknowns": ["No remote CLI completion log found."],
+        }),
         usage=FakeUsage(),
     )
     sdk = FakeSdkClient(response)
@@ -200,52 +198,48 @@ def test_openrouter_client_includes_response_preview_for_non_object_json():
 
 
 def test_diagnosis_report_defaults_needs_more_evidence_for_old_payloads():
-    report = DiagnosisReport.from_dict(
-        {
-            "summary": "summary",
-            "failure_surface": "surface",
-            "confidence": "supported",
-            "root_cause": "cause",
-        }
-    )
+    report = DiagnosisReport.from_dict({
+        "summary": "summary",
+        "failure_surface": "surface",
+        "confidence": "supported",
+        "root_cause": "cause",
+    })
 
     assert report.needs_more_evidence is False
 
 
 def test_diagnosis_report_reads_optional_triage_v2_fields():
-    report = DiagnosisReport.from_dict(
-        {
-            "summary": "summary",
-            "failure_surface": "surface",
-            "confidence": "supported",
-            "root_cause": "cause",
-            "triage_confidence": "medium",
-            "failure_timeline": [
-                {
-                    "timestamp": "10:42:29",
-                    "source": "rabbitmq.log",
-                    "location": "line 120",
-                    "event": "RabbitMQ closed the connection.",
-                }
-            ],
-            "cascading_errors": [
-                {
-                    "path": "nova-api.log",
-                    "line": 1242,
-                    "excerpt": "oslo.messaging timeout",
-                }
-            ],
-            "alternatives_considered": [
-                {
-                    "hypothesis": "Database outage",
-                    "status": "less_likely",
-                    "reason": "No DB errors near the first failure timestamp.",
-                }
-            ],
-            "missing_evidence": ["Need neutron-server timing."],
-            "stop_reason": "sufficient_evidence",
-        }
-    )
+    report = DiagnosisReport.from_dict({
+        "summary": "summary",
+        "failure_surface": "surface",
+        "confidence": "supported",
+        "root_cause": "cause",
+        "triage_confidence": "medium",
+        "failure_timeline": [
+            {
+                "timestamp": "10:42:29",
+                "source": "rabbitmq.log",
+                "location": "line 120",
+                "event": "RabbitMQ closed the connection.",
+            }
+        ],
+        "cascading_errors": [
+            {
+                "path": "nova-api.log",
+                "line": 1242,
+                "excerpt": "oslo.messaging timeout",
+            }
+        ],
+        "alternatives_considered": [
+            {
+                "hypothesis": "Database outage",
+                "status": "less_likely",
+                "reason": "No DB errors near the first failure timestamp.",
+            }
+        ],
+        "missing_evidence": ["Need neutron-server timing."],
+        "stop_reason": "sufficient_evidence",
+    })
 
     assert report.triage_confidence == "medium"
     assert report.failure_timeline[0].source == "rabbitmq.log"
@@ -365,41 +359,37 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     output = artifact_root / "generated/sunbeam/output.log"
     output.parent.mkdir(parents=True)
     output.write_text("wait timed out\nretry failed", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall("call-1", "list_artifact_files", "{}"),
-                    FakeToolCall(
-                        "call-2",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/sunbeam/output.log"}),
-                    ),
-                ],
-            ),
-            FakeSdkResponse(
-                json.dumps(
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall("call-1", "list_artifact_files", "{}"),
+                FakeToolCall(
+                    "call-2",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/sunbeam/output.log"}),
+                ),
+            ],
+        ),
+        FakeSdkResponse(
+            json.dumps({
+                "summary": "The deploy step timed out.",
+                "failure_surface": "sunbeam cluster resize timed out.",
+                "confidence": "supported",
+                "root_cause": "Readiness did not converge before timeout.",
+                "evidence": [
                     {
-                        "summary": "The deploy step timed out.",
-                        "failure_surface": "sunbeam cluster resize timed out.",
-                        "confidence": "supported",
-                        "root_cause": "Readiness did not converge before timeout.",
-                        "evidence": [
-                            {
-                                "path": "generated/sunbeam/output.log",
-                                "line": 1,
-                                "excerpt": "wait timed out",
-                            }
-                        ],
-                        "candidate_mechanisms": [],
-                        "recommendations": [],
-                        "unknowns": [],
+                        "path": "generated/sunbeam/output.log",
+                        "line": 1,
+                        "excerpt": "wait timed out",
                     }
-                )
-            ),
-        ]
-    )
+                ],
+                "candidate_mechanisms": [],
+                "recommendations": [],
+                "unknowns": [],
+            })
+        ),
+    ])
 
     client = OpenRouterClient(_config(), sdk_client=sdk)
     report = client.diagnose(
@@ -434,26 +424,24 @@ def test_openrouter_client_deduplicates_repeated_tool_calls(tmp_path):
     output = artifact_root / "generated/sunbeam/output.log"
     output.parent.mkdir(parents=True)
     output.write_text("wait timed out\n", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/sunbeam/output.log"}),
-                    ),
-                    FakeToolCall(
-                        "call-2",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/sunbeam/output.log"}),
-                    ),
-                ],
-            ),
-            FakeSdkResponse("I have enough context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/sunbeam/output.log"}),
+                ),
+                FakeToolCall(
+                    "call-2",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/sunbeam/output.log"}),
+                ),
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
 
     OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -462,7 +450,9 @@ def test_openrouter_client_deduplicates_repeated_tool_calls(tmp_path):
     )
 
     tool_messages = [
-        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message["role"] == "tool"
     ]
     assert "wait timed out" in tool_messages[0]["content"]
     duplicate = json.loads(tool_messages[1]["content"])
@@ -479,22 +469,20 @@ def test_openrouter_client_caps_tool_calls_per_round(tmp_path):
     generated.mkdir(parents=True)
     for index in range(5):
         (generated / f"{index}.log").write_text(f"log {index}\n", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        f"call-{index}",
-                        "get_artifact_file",
-                        json.dumps({"path": f"generated/{index}.log"}),
-                    )
-                    for index in range(5)
-                ],
-            ),
-            FakeSdkResponse("I have enough context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    f"call-{index}",
+                    "get_artifact_file",
+                    json.dumps({"path": f"generated/{index}.log"}),
+                )
+                for index in range(5)
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
 
     OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -503,7 +491,9 @@ def test_openrouter_client_caps_tool_calls_per_round(tmp_path):
     )
 
     tool_messages = [
-        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message["role"] == "tool"
     ]
     assert "log 0" in tool_messages[0]["content"]
     assert "log 3" in tool_messages[3]["content"]
@@ -520,42 +510,38 @@ def test_openrouter_client_emits_progress_for_tool_loop(tmp_path):
     output = artifact_root / "generated/sunbeam/output.log"
     output.parent.mkdir(parents=True)
     output.write_text("wait timed out\nretry failed", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                usage=FakeUsage(),
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/sunbeam/output.log"}),
-                    ),
-                ],
-            ),
-            FakeSdkResponse(
-                json.dumps(
-                    {
-                        "summary": "The deploy step timed out.",
-                        "failure_surface": "sunbeam cluster resize timed out.",
-                        "confidence": "supported",
-                        "root_cause": "Readiness did not converge before timeout.",
-                        "evidence": [
-                            {
-                                "path": "generated/sunbeam/output.log",
-                                "line": 1,
-                                "excerpt": "wait timed out",
-                            }
-                        ],
-                        "candidate_mechanisms": [],
-                        "recommendations": [],
-                        "unknowns": [],
-                    }
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            usage=FakeUsage(),
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/sunbeam/output.log"}),
                 ),
-                usage=FakeUsage(),
-            ),
-        ]
-    )
+            ],
+        ),
+        FakeSdkResponse(
+            json.dumps({
+                "summary": "The deploy step timed out.",
+                "failure_surface": "sunbeam cluster resize timed out.",
+                "confidence": "supported",
+                "root_cause": "Readiness did not converge before timeout.",
+                "evidence": [
+                    {
+                        "path": "generated/sunbeam/output.log",
+                        "line": 1,
+                        "excerpt": "wait timed out",
+                    }
+                ],
+                "candidate_mechanisms": [],
+                "recommendations": [],
+                "unknowns": [],
+            }),
+            usage=FakeUsage(),
+        ),
+    ])
     client = OpenRouterClient(_config(), sdk_client=sdk)
     events = []
 
@@ -587,21 +573,19 @@ def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     log = artifact_root / "generated/run.log"
     log.parent.mkdir(parents=True)
     log.write_text("failure detail", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/run.log"}),
-                    )
-                ],
-            ),
-            FakeSdkResponse("The failure detail confirms the timeout."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/run.log"}),
+                )
+            ],
+        ),
+        FakeSdkResponse("The failure detail confirms the timeout."),
+    ])
 
     answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -614,7 +598,9 @@ def test_openrouter_client_executes_artifact_tool_calls_for_chat(tmp_path):
     assert sdk.chat.calls[0]["tools"][1]["function"]["name"] == "get_artifact_file"
     assert sdk.chat.calls[0]["parallel_tool_calls"] is False
     tool_messages = [
-        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message["role"] == "tool"
     ]
     assert "failure detail" in tool_messages[-1]["content"]
 
@@ -624,21 +610,19 @@ def test_openrouter_client_trims_large_tool_results_by_budget(tmp_path):
     log = artifact_root / "generated/run.log"
     log.parent.mkdir(parents=True)
     log.write_text("x" * 500, encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/run.log", "max_bytes": 500}),
-                    )
-                ],
-            ),
-            FakeSdkResponse("I have enough context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/run.log", "max_bytes": 500}),
+                )
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
 
     answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -648,7 +632,9 @@ def test_openrouter_client_trims_large_tool_results_by_budget(tmp_path):
     )
 
     tool_messages = [
-        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message["role"] == "tool"
     ]
     tool_result = json.loads(tool_messages[-1]["content"])
     assert answer == "I have enough context."
@@ -665,26 +651,24 @@ def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
     first.parent.mkdir(parents=True)
     first.write_text("a" * 300, encoding="utf-8")
     second.write_text("b" * 300, encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/first.log", "max_bytes": 300}),
-                    ),
-                    FakeToolCall(
-                        "call-2",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/second.log", "max_bytes": 300}),
-                    ),
-                ],
-            ),
-            FakeSdkResponse("I have enough context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/first.log", "max_bytes": 300}),
+                ),
+                FakeToolCall(
+                    "call-2",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/second.log", "max_bytes": 300}),
+                ),
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
 
     OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -699,7 +683,10 @@ def test_openrouter_client_applies_tool_result_budget_across_calls(tmp_path):
         if message.get("role") == "tool"
     ]
     assert sum(len(message["content"]) for message in tool_messages) <= 260
-    assert json.loads(tool_messages[-1]["content"])["tool_result_truncated_by_budget"] is True
+    assert (
+        json.loads(tool_messages[-1]["content"])["tool_result_truncated_by_budget"]
+        is True
+    )
 
 
 def test_openrouter_client_reports_truncation_when_call_budget_is_tiny(tmp_path):
@@ -709,26 +696,24 @@ def test_openrouter_client_reports_truncation_when_call_budget_is_tiny(tmp_path)
     first.parent.mkdir(parents=True)
     first.write_text("a" * 300, encoding="utf-8")
     second.write_text("b" * 300, encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/first.log", "max_bytes": 300}),
-                    ),
-                    FakeToolCall(
-                        "call-2",
-                        "get_artifact_file",
-                        json.dumps({"path": "generated/second.log", "max_bytes": 300}),
-                    ),
-                ],
-            ),
-            FakeSdkResponse("I have enough context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/first.log", "max_bytes": 300}),
+                ),
+                FakeToolCall(
+                    "call-2",
+                    "get_artifact_file",
+                    json.dumps({"path": "generated/second.log", "max_bytes": 300}),
+                ),
+            ],
+        ),
+        FakeSdkResponse("I have enough context."),
+    ])
 
     OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -783,22 +768,20 @@ def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_to
         "recommendations": [],
         "unknowns": [],
     }
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(json.dumps(incomplete)),
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "search_artifacts",
-                        json.dumps({"pattern": "Unexpected status code 502"}),
-                    )
-                ],
-            ),
-            FakeSdkResponse(json.dumps(complete)),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(json.dumps(incomplete)),
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_artifacts",
+                    json.dumps({"pattern": "Unexpected status code 502"}),
+                )
+            ],
+        ),
+        FakeSdkResponse(json.dumps(complete)),
+    ])
 
     report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
         "evidence text",
@@ -844,22 +827,20 @@ def test_openrouter_client_retries_supported_no_tool_diagnosis_until_evidence_to
         **unsupported,
         "summary": "Refstack failed while authenticating.",
     }
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(json.dumps(unsupported)),
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "search_artifacts",
-                        json.dumps({"pattern": "Unexpected status code 502"}),
-                    )
-                ],
-            ),
-            FakeSdkResponse(json.dumps(supported)),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(json.dumps(unsupported)),
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_artifacts",
+                    json.dumps({"pattern": "Unexpected status code 502"}),
+                )
+            ],
+        ),
+        FakeSdkResponse(json.dumps(supported)),
+    ])
 
     report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
         "evidence text",
@@ -901,12 +882,10 @@ def test_openrouter_client_rejects_supported_diagnosis_when_required_tools_are_i
         "recommendations": [],
         "unknowns": [],
     }
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(json.dumps(response)),
-            FakeSdkResponse(json.dumps(response)),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(json.dumps(response)),
+        FakeSdkResponse(json.dumps(response)),
+    ])
 
     with pytest.raises(RuntimeError, match="ignored required artifact tool use"):
         OpenRouterClient(_config(), sdk_client=sdk).diagnose(
@@ -937,20 +916,18 @@ def test_openrouter_client_rejects_discovery_only_supported_diagnosis_without_ev
         "recommendations": [],
         "unknowns": [],
     }
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
-            ),
-            FakeSdkResponse(json.dumps(response)),
-            FakeSdkResponse(
-                "",
-                tool_calls=[FakeToolCall("call-2", "list_sosreports", "{}")],
-            ),
-            FakeSdkResponse(json.dumps(response)),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
+        ),
+        FakeSdkResponse(json.dumps(response)),
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall("call-2", "list_sosreports", "{}")],
+        ),
+        FakeSdkResponse(json.dumps(response)),
+    ])
 
     with pytest.raises(RuntimeError, match="evidence-producing artifact tool"):
         OpenRouterClient(_config(), sdk_client=sdk).diagnose(
@@ -977,21 +954,19 @@ def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):
         "recommendations": ["Review service logs manually."],
         "unknowns": ["No decisive service-side cause found."],
     }
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "search_artifacts",
-                        json.dumps({"pattern": "Unexpected status code 502"}),
-                    )
-                ],
-            ),
-            FakeSdkResponse(json.dumps(response)),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_artifacts",
+                    json.dumps({"pattern": "Unexpected status code 502"}),
+                )
+            ],
+        ),
+        FakeSdkResponse(json.dumps(response)),
+    ])
 
     report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
         "evidence text",
@@ -1005,35 +980,31 @@ def test_openrouter_client_does_not_retry_after_diagnosis_used_tools(tmp_path):
 def test_openrouter_client_downgrades_confirmed_diagnosis_after_tool_budget_fallback(
     tmp_path,
 ):
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
-            ),
-            FakeSdkResponse(
-                json.dumps(
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
+        ),
+        FakeSdkResponse(
+            json.dumps({
+                "summary": "The join timed out waiting for k8s.",
+                "failure_surface": "sunbeam cluster join timed out.",
+                "confidence": "confirmed",
+                "root_cause": "The orchestrator agent was lost.",
+                "needs_more_evidence": False,
+                "evidence": [],
+                "candidate_mechanisms": [
                     {
-                        "summary": "The join timed out waiting for k8s.",
-                        "failure_surface": "sunbeam cluster join timed out.",
-                        "confidence": "confirmed",
-                        "root_cause": "The orchestrator agent was lost.",
-                        "needs_more_evidence": False,
-                        "evidence": [],
-                        "candidate_mechanisms": [
-                            {
-                                "name": "orchestrator agent lost",
-                                "status": "confirmed",
-                                "rationale": "Status showed the unit lost.",
-                            }
-                        ],
-                        "recommendations": ["Inspect the sosreport."],
-                        "unknowns": [],
+                        "name": "orchestrator agent lost",
+                        "status": "confirmed",
+                        "rationale": "Status showed the unit lost.",
                     }
-                )
-            ),
-        ]
-    )
+                ],
+                "recommendations": ["Inspect the sosreport."],
+                "unknowns": [],
+            })
+        ),
+    ])
 
     report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
         "evidence text",
@@ -1053,21 +1024,19 @@ def test_openrouter_client_nudges_targeted_read_after_broad_tool_only_round(
     log = tmp_path / "generated/sunbeam/output.log"
     log.parent.mkdir(parents=True)
     log.write_text("wait timed out\n", encoding="utf-8")
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "search_artifacts",
-                        json.dumps({"pattern": "wait timed out"}),
-                    )
-                ],
-            ),
-            FakeSdkResponse("The timeout is visible."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_artifacts",
+                    json.dumps({"pattern": "wait timed out"}),
+                )
+            ],
+        ),
+        FakeSdkResponse("The timeout is visible."),
+    ])
 
     OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -1091,30 +1060,25 @@ def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
         "sosreport-node-a-2026-06-23-abc/home/ubuntu/snap/openstack/common/logs/sunbeam.log",
         "starting\nResultType.COMPLETED\n",
     )
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[
-                    FakeToolCall(
-                        "call-1",
-                        "search_sosreport",
-                        json.dumps(
-                            {
-                                "archive_path": (
-                                    "generated/sunbeam/"
-                                    "sosreport-node-a-2026-06-23-abc.tar.xz"
-                                ),
-                                "pattern": "ResultType.COMPLETED",
-                                "prefix": "home/ubuntu/snap/openstack/common/logs/",
-                            }
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "search_sosreport",
+                    json.dumps({
+                        "archive_path": (
+                            "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"
                         ),
-                    )
-                ],
-            ),
-            FakeSdkResponse("The remote command completed."),
-        ]
-    )
+                        "pattern": "ResultType.COMPLETED",
+                        "prefix": "home/ubuntu/snap/openstack/common/logs/",
+                    }),
+                )
+            ],
+        ),
+        FakeSdkResponse("The remote command completed."),
+    ])
 
     answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",
@@ -1127,21 +1091,21 @@ def test_openrouter_client_executes_sosreport_tool_calls_for_chat(tmp_path):
     tool_names = [tool["function"]["name"] for tool in sdk.chat.calls[0]["tools"]]
     assert "search_sosreport" in tool_names
     tool_messages = [
-        message for message in sdk.chat.calls[1]["messages"] if message["role"] == "tool"
+        message
+        for message in sdk.chat.calls[1]["messages"]
+        if message["role"] == "tool"
     ]
     assert "ResultType.COMPLETED" in tool_messages[-1]["content"]
 
 
 def test_openrouter_client_answers_without_tools_after_max_tool_rounds(tmp_path):
-    sdk = FakeSdkClient(
-        [
-            FakeSdkResponse(
-                "",
-                tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
-            ),
-            FakeSdkResponse("Answering with the available context."),
-        ]
-    )
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[FakeToolCall("call-1", "list_artifact_files", "{}")],
+        ),
+        FakeSdkResponse("Answering with the available context."),
+    ])
 
     answer = OpenRouterClient(_config(), sdk_client=sdk).chat(
         "context",

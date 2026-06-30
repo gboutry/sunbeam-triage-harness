@@ -6,28 +6,26 @@ from sunbeam_triage.cli.analyze_rounds import main
 def test_analyze_rounds_prints_session_summary(tmp_path, capsys):
     path = tmp_path / "session.json"
     path.write_text(
-        json.dumps(
-            {
-                "uuid": "uuid-1",
-                "model": "model/a",
-                "exchanges": [
-                    {
-                        "response": {
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "function": {
-                                        "name": "search_artifacts",
-                                        "arguments": '{"pattern": "ERROR"}',
-                                    },
-                                }
-                            ],
-                            "usage": {"total_tokens": 42, "cost": 0.0042},
-                        }
+        json.dumps({
+            "uuid": "uuid-1",
+            "model": "model/a",
+            "exchanges": [
+                {
+                    "response": {
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "search_artifacts",
+                                    "arguments": '{"pattern": "ERROR"}',
+                                },
+                            }
+                        ],
+                        "usage": {"total_tokens": 42, "cost": 0.0042},
                     }
-                ],
-            }
-        ),
+                }
+            ],
+        }),
         encoding="utf-8",
     )
 

@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "openrouter>=0.10.0",
     "streamlit",
+    "typing-extensions",
 ]
 
 [project.scripts]
@@ -22,8 +23,86 @@ sunbeam-triage-arena = "sunbeam_triage.cli.arena:main"
 
 [dependency-groups]
 dev = [
+    "pre-commit",
     "pytest",
+    "ruff==0.15.20",
+    "ty==0.0.55",
 ]
 
 [tool.setuptools.packages.find]
 include = ["sunbeam_triage*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+preview = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "ANN001",
+    "ANN003",
+    "ANN202",
+    "ANN204",
+    "ANN401",  # OpenRouter and persisted JSON payloads are intentionally dynamic.
+    "BLE001",  # UI and arena runs surface arbitrary runtime failures to users.
+    "C901",
+    "COM812",  # Handled by the formatter.
+    "CPY001",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D107",
+    "D203",
+    "D212",
+    "E501",  # Existing prompts and rendered HTML include long literal text.
+    "EM101",
+    "EM102",
+    "FLY002",
+    "PLC0415",
+    "PLR2004",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0914",
+    "PLR0917",
+    "PLR1702",
+    "PLW0717",
+    "T201",
+    "TC001",
+    "TC003",
+    "TID252",
+    "TRY003",
+    "TRY004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"sunbeam_triage/core/http.py" = ["S310"]
+"tests/**" = [
+    "ANN001",
+    "ANN003",
+    "ANN201",
+    "ANN202",
+    "ANN204",
+    "INP001",
+    "PLR2004",
+    "PT017",
+    "RUF012",
+    "RUF069",
+    "S101",
+    "S404",
+    "S603",
+    "S607",
+    "SLF001",
+    "PLC1901",
+    "PLR6301",
+]
+
+[tool.ty.src]
+include = ["sunbeam_triage", "tests"]
+
+[tool.ty.rules]
+all = "error"

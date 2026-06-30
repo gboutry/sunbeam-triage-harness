@@ -22,7 +22,9 @@ def test_evidence_collector_identifies_first_failed_non_cleanup_step():
 def test_evidence_pack_prompt_is_bounded_and_contains_file_references():
     root = Path("tests/fixtures/sample_uuid")
 
-    prompt = EvidenceCollector(root, "sample-uuid").collect().to_prompt_text(max_chars=4000)
+    prompt = (
+        EvidenceCollector(root, "sample-uuid").collect().to_prompt_text(max_chars=4000)
+    )
 
     assert "Solutions Run UUID: sample-uuid" in prompt
     assert "generated/sunbeam/output.log:" in prompt
@@ -99,23 +101,21 @@ def test_evidence_collector_keeps_generic_steps_generic_without_sunbeam_artifact
 def test_status_summary_omits_benign_headers_but_keeps_status_signal(tmp_path):
     status = tmp_path / "status.txt"
     status.write_text(
-        "\n".join(
-            [
-                "Model Controller Cloud",
-                "openstack controller localhost",
-                "App Version Status",
-                "keystone active",
-                "nova active",
-                "glance active",
-                "cinder active",
-                "ovn active",
-                "rabbitmq active",
-                "mysql active",
-                "placement active",
-                "horizon active",
-                "placement-mysql-router waiting idle",
-            ]
-        ),
+        "\n".join([
+            "Model Controller Cloud",
+            "openstack controller localhost",
+            "App Version Status",
+            "keystone active",
+            "nova active",
+            "glance active",
+            "cinder active",
+            "ovn active",
+            "rabbitmq active",
+            "mysql active",
+            "placement active",
+            "horizon active",
+            "placement-mysql-router waiting idle",
+        ]),
         encoding="utf-8",
     )
 

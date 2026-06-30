@@ -49,7 +49,7 @@ def test_render_line_preview_escapes_and_highlights_referenced_lines():
 
     assert "&lt;script&gt;" in html
     assert 'class="evidence-line"' in html
-    assert "data-line=\"2\"" in html
+    assert 'data-line="2"' in html
     assert "<script>" not in html
 
 
@@ -76,7 +76,7 @@ def test_read_text_preview_marks_binary_files(tmp_path):
 
 
 class FakeHttp:
-    def post_json(self, url, payload, headers):
+    def post_json(self, _url, _payload, headers):
         assert headers["Authorization"] == "Bearer secret-token"
         return {"choices": [{"message": {"content": "{}"}}]}
 
