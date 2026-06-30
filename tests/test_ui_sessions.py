@@ -5,17 +5,25 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 
+from sunbeam_triage.core.config import Config
 from sunbeam_triage.core.evidence import EvidenceCollector
 from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
 from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.core.progress import ProgressEvent
 from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
-from sunbeam_triage.ui.helpers import (
-    build_followup_context,
+from sunbeam_triage.core.ui_sessions import (
     list_saved_sessions,
     load_ui_session,
     save_ui_session,
     session_store_root,
+)
+from sunbeam_triage.core.use_cases import (
+    ArenaVerdictRequest,
+    TriageUseCases,
+    build_followup_context,
+    persist_diagnosis_session,
+    report_from_session,
+    session_from_diagnosis,
 )
 
 
@@ -155,7 +163,6 @@ def test_build_followup_context_includes_deterministic_probe_findings():
 
 
 def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
-    app = _streamlit_app()
     report = DiagnosisReport(
         summary="Incomplete",
         failure_surface="Wrapper failure",
@@ -164,7 +171,7 @@ def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
         needs_more_evidence=True,
     )
 
-    session = app._session_from_diagnosis(
+    session = session_from_diagnosis(
         uuid="uuid",
         model="model/a",
         artifact_root=tmp_path / "uuid",
@@ -176,12 +183,11 @@ def test_diagnosis_session_persists_needs_more_evidence(tmp_path):
     )
 
     assert session["needs_more_evidence"] is True
-    assert app._report_from_session(session).needs_more_evidence is True
-    assert app._report_from_session({"summary": "old"}).needs_more_evidence is False
+    assert report_from_session(session).needs_more_evidence is True
+    assert report_from_session({"summary": "old"}).needs_more_evidence is False
 
 
 def test_diagnosis_session_persists_progress_events(tmp_path):
-    app = _streamlit_app()
     report = DiagnosisReport(
         summary="Incomplete",
         failure_surface="Wrapper failure",
@@ -196,7 +202,7 @@ def test_diagnosis_session_persists_progress_events(tmp_path):
         message="Model request sent",
     )
 
-    session = app._session_from_diagnosis(
+    session = session_from_diagnosis(
         uuid="uuid",
         model="model/a",
         artifact_root=tmp_path / "uuid",
@@ -312,7 +318,6 @@ def test_result_helpers_handle_older_sessions_without_v2_fields():
 
 
 def test_diagnosis_session_persists_probe_results(tmp_path):
-    app = _streamlit_app()
     report = DiagnosisReport(
         summary="Incomplete",
         failure_surface="K8s timeout",
@@ -333,7 +338,7 @@ def test_diagnosis_session_persists_probe_results(tmp_path):
         ],
     )
 
-    session = app._session_from_diagnosis(
+    session = session_from_diagnosis(
         uuid="uuid",
         model="model/a",
         artifact_root=tmp_path / "uuid",
@@ -379,7 +384,6 @@ def test_append_progress_event_records_concise_trace():
 
 
 def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
-    app = _streamlit_app()
     report = DiagnosisReport.from_dict({
         "summary": "Timed out",
         "failure_surface": "Deploy timeout",
@@ -412,7 +416,7 @@ def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
         "stop_reason": "sufficient_evidence",
     })
 
-    session = app._session_from_diagnosis(
+    session = session_from_diagnosis(
         uuid="uuid",
         model="model/a",
         artifact_root=tmp_path / "uuid",
@@ -422,7 +426,7 @@ def test_diagnosis_session_round_trips_triage_v2_fields(tmp_path):
         exchanges=[],
         download_failures=[],
     )
-    loaded = app._report_from_session(session)
+    loaded = report_from_session(session)
 
     assert session["triage_confidence"] == "medium"
     assert loaded.failure_timeline[0].source == "rabbitmq.log"
@@ -444,8 +448,9 @@ def test_arena_contender_label_hides_model_until_verdict():
 
 
 def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tmp_path):
-    app = _streamlit_app()
     artifact_root = tmp_path / "artifacts"
+    config = Config.load(None)
+    config.paths.artifact_root = artifact_root
     save_session_snapshot(
         artifact_root,
         {
@@ -466,27 +471,28 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
     assert record is not None
     session = record["snapshot"]
 
-    updated = app._save_arena_verdict(
-        artifact_root,
-        session,
-        winner="B",
-        notes="B had better evidence.",
-        rubric={
-            "A": {
-                "root_cause": 2,
-                "evidence": 2,
-                "timeline": 1,
-                "uncertainty": 2,
-                "next_steps": 2,
+    updated = TriageUseCases(config).save_arena_verdict(
+        ArenaVerdictRequest(
+            session=session,
+            winner="B",
+            notes="B had better evidence.",
+            rubric={
+                "A": {
+                    "root_cause": 2,
+                    "evidence": 2,
+                    "timeline": 1,
+                    "uncertainty": 2,
+                    "next_steps": 2,
+                },
+                "B": {
+                    "root_cause": 5,
+                    "evidence": 5,
+                    "timeline": 4,
+                    "uncertainty": 4,
+                    "next_steps": 5,
+                },
             },
-            "B": {
-                "root_cause": 5,
-                "evidence": 5,
-                "timeline": 4,
-                "uncertainty": 4,
-                "next_steps": 5,
-            },
-        },
+        )
     )
 
     loaded = load_session_record(artifact_root, "arena-sample")
@@ -498,7 +504,6 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
 
 
 def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
-    app = _streamlit_app()
     artifact_root = tmp_path / "artifacts"
     session = {
         "uuid": "sample-uuid",
@@ -509,7 +514,7 @@ def test_persist_diagnosis_session_writes_legacy_and_v2_snapshot(tmp_path):
         "chat": [],
     }
 
-    app._persist_diagnosis_session(artifact_root, session)
+    persist_diagnosis_session(artifact_root, session)
 
     assert load_ui_session(artifact_root, "sample-uuid") == session
     loaded = load_session_record(artifact_root, "sample-uuid")
