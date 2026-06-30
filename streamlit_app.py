@@ -830,7 +830,7 @@ def _render_download_failures(session: dict[str, Any]) -> None:
     if not failures:
         return
     st.warning(f"{len(failures)} Swift objects failed to download.")
-    st.dataframe(failures, use_container_width=True, hide_index=True)
+    st.dataframe(failures, width="stretch", hide_index=True)
 
 
 def _render_evidence_tab(session: dict[str, Any]) -> None:
@@ -877,7 +877,7 @@ def _render_probe_tab(session: dict[str, Any]) -> None:
                 }
             )
     if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
     for result in probe_results:
         st.markdown(
             f"**{result.get('name', '')}** · {result.get('status', '')}: "
@@ -916,9 +916,9 @@ def _render_tool_activity_tab(session: dict[str, Any]) -> None:
     if analysis["warnings"]:
         st.warning(", ".join(analysis["warnings"]))
     if analysis["repeated_reads"]:
-        st.dataframe(analysis["repeated_reads"], use_container_width=True, hide_index=True)
+        st.dataframe(analysis["repeated_reads"], width="stretch", hide_index=True)
     if analysis["rows"]:
-        st.dataframe(analysis["rows"], use_container_width=True, hide_index=True)
+        st.dataframe(analysis["rows"], width="stretch", hide_index=True)
     else:
         st.info("No tool activity recorded.")
 
@@ -968,7 +968,7 @@ def _render_progress_console(events: list[dict[str, Any]], *, title: str) -> Non
             phase = contender_events[-1].get("phase", "") if contender_events else ""
             column.metric(f"Contender {contender_id}", status, phase)
 
-    st.dataframe(_progress_event_rows(events), use_container_width=True, hide_index=True)
+    st.dataframe(_progress_event_rows(events), width="stretch", hide_index=True)
     with st.expander("Raw progress trace"):
         st.json(events, expanded=False)
 
