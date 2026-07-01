@@ -421,6 +421,30 @@ def test_get_sosreport_file_rejects_unsafe_member_path(tmp_path):
     assert "safe relative" in result["error"]
 
 
+def test_missing_sosreport_archive_suggests_closest_archive(tmp_path):
+    root = tmp_path / "uuid"
+    archive = root / "generated/sunbeam/sosreport-snorlax-2026-06-23-abc.tar.xz"
+    _write_sosreport(
+        archive,
+        {"sosreport-snorlax-2026-06-23-abc/var/log/syslog": "line\n"},
+    )
+
+    result = execute_artifact_tool(
+        root,
+        "get_sosreport_file",
+        {
+            "archive_path": "generated/sunbeam/sosreport-snaroli-2026-06-23-abc.tar.xz",
+            "member_path": "var/log/syslog",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "Archive does not exist."
+    assert result["suggested_archive_paths"] == [
+        "generated/sunbeam/sosreport-snorlax-2026-06-23-abc.tar.xz"
+    ]
+
+
 def test_search_sosreport_skips_binary_members(tmp_path):
     root = tmp_path / "uuid"
     archive = root / "generated/sunbeam/sosreport-node-a-2026-06-23-abc.tar.xz"

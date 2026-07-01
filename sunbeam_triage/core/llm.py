@@ -39,6 +39,7 @@ from .llm_tool_loop import ArtifactToolLoop
 from .llm_transport import OpenRouterTransport, cache_kwargs
 from .progress import ProgressSink
 from .redaction import redact_text
+from .report_validation import observations_from_exchanges, validate_diagnosis_report
 from .triage_state import TriageLoopOptions
 
 __all__ = [
@@ -170,6 +171,11 @@ class OpenRouterClient:
             raise RuntimeError(
                 "Model returned a confirmed diagnosis without using a targeted "
                 "artifact read; diagnosis was not validated."
+            )
+        if artifact_root is not None:
+            data = validate_diagnosis_report(
+                data,
+                observations_from_exchanges(self.exchanges, exchange_start),
             )
         return DiagnosisReport.from_dict(data)
 

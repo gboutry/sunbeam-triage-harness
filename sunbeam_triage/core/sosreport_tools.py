@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import tarfile
+from difflib import get_close_matches
 from operator import itemgetter
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -368,11 +369,19 @@ def _archive_ref(
         }
     path = Path(root) / relative
     if not path.exists() or not path.is_file():
-        return {
+        result: dict[str, Any] = {
             "ok": False,
             "archive_path": relative.as_posix(),
             "error": "Archive does not exist.",
         }
+        suggestions = _suggest_archive_paths(
+            root,
+            relative,
+            sosreport_only=sosreport_only,
+        )
+        if suggestions:
+            result["suggested_archive_paths"] = suggestions
+        return result
     if not path.name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz")):
         return {
             "ok": False,
@@ -423,6 +432,23 @@ def _host_from_archive_name(name: str) -> str:
     if match:
         return match.group("host")
     return ""
+
+
+def _suggest_archive_paths(
+    root: Path,
+    requested: Path,
+    *,
+    sosreport_only: bool,
+) -> list[str]:
+    candidates = []
+    for path in Path(root).rglob("*.tar*"):
+        if not path.is_file() or path.name.endswith(".sha256"):
+            continue
+        if sosreport_only and not path.name.startswith("sosreport-"):
+            continue
+        relative = path.relative_to(root).as_posix()
+        candidates.append(relative)
+    return get_close_matches(requested.as_posix(), candidates, n=3, cutoff=0.6)
 
 
 def _coerce_limit(value: Any, default: int) -> int:
