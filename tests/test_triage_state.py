@@ -84,6 +84,41 @@ def test_investigation_state_stops_after_sufficient_independent_evidence():
     assert state.stop_reason == "sufficient_evidence"
 
 
+def test_investigation_state_requires_targeted_evidence_for_sufficiency():
+    options = TriageLoopOptions(max_rounds=12, hard_max_rounds=20)
+    state = InvestigationState(options=options)
+
+    state.apply_observation(
+        observe_tool_result(
+            "search_artifacts",
+            {"pattern": "first error"},
+            json.dumps({
+                "ok": True,
+                "matches": [
+                    {
+                        "path": "nova-api.log",
+                        "line": 1242,
+                        "excerpt": "10:42:31 oslo.messaging timeout",
+                    },
+                    {
+                        "path": "rabbitmq.log",
+                        "line": 120,
+                        "excerpt": "10:42:29 closing AMQP connection",
+                    },
+                ],
+            }),
+        )
+    )
+    state.alternatives_considered.append({
+        "hypothesis": "Database outage",
+        "status": "less_likely",
+        "reason": "No DB errors near the first failure timestamp.",
+    })
+
+    assert state.should_finalize() is False
+    assert state.stop_reason == ""
+
+
 def test_investigation_state_stalls_after_repeated_non_progress():
     options = TriageLoopOptions(
         max_rounds=12,

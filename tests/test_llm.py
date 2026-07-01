@@ -443,6 +443,82 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert "first meaningful error" not in system_prompt
 
 
+def test_openrouter_client_validates_report_against_tool_provenance(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    output = artifact_root / "generated/sunbeam/output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("Node sarabhai is ready\n", encoding="utf-8")
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({
+                        "path": "generated/sunbeam/output.log",
+                        "line_start": 1,
+                    }),
+                ),
+                FakeToolCall(
+                    "call-2",
+                    "get_sosreport_file",
+                    json.dumps({
+                        "archive_path": (
+                            "generated/sunbeam/sosreport-snaroli.tar.xz"
+                        ),
+                        "member_path": "var/log/syslog",
+                    }),
+                ),
+            ],
+        ),
+        FakeSdkResponse(
+            json.dumps({
+                "summary": "The join step failed while snorlax was not ready.",
+                "failure_surface": "sunbeam cluster join failed.",
+                "confidence": "confirmed",
+                "root_cause": "Node snorlax never registered.",
+                "needs_more_evidence": False,
+                "evidence": [
+                    {
+                        "path": "generated/sunbeam/output.log",
+                        "line": 895,
+                        "excerpt": "Node snorlax is not ready",
+                    }
+                ],
+                "candidate_mechanisms": [
+                    {
+                        "name": "snorlax node registration failure",
+                        "status": "confirmed",
+                        "rationale": "snorlax never registered.",
+                    }
+                ],
+                "recommendations": [],
+                "unknowns": [],
+                "triage_confidence": "high",
+                "failure_timeline": [],
+                "cascading_errors": [],
+                "alternatives_considered": [],
+                "missing_evidence": [],
+                "stop_reason": "",
+            })
+        ),
+    ])
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        session_id="uuid",
+        artifact_root=artifact_root,
+    )
+
+    assert report.confidence == "supported"
+    assert report.triage_confidence == "medium"
+    assert report.needs_more_evidence is True
+    assert report.candidate_mechanisms[0].status == "supported"
+    assert any("snorlax" in item for item in report.missing_evidence)
+    assert any("failed targeted read" in item for item in report.unknowns)
+
+
 def test_openrouter_client_sends_and_records_redacted_tool_results(tmp_path):
     artifact_root = tmp_path / "uuid"
     output = artifact_root / "generated/sunbeam/output.log"

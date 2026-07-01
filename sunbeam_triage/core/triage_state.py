@@ -34,6 +34,10 @@ class ToolObservation:
     args_key: str
     result_key: str
     evidence_keys: tuple[str, ...] = ()
+    read_class: str = "discovery"
+    source_refs: tuple[str, ...] = ()
+    entities: tuple[str, ...] = ()
+    success: bool = False
     timestamp_count: int = 0
     truncated: bool = False
     error: str = ""
@@ -54,6 +58,8 @@ class InvestigationState:
     confidence: str = "unknown"
     next_action: str = ""
     stop_reason: str = ""
+    targeted_evidence_count: int = 0
+    failed_targeted_reads: list[str] = field(default_factory=list)
     stall_count: int = 0
     _seen_observations: set[str] = field(default_factory=set, init=False, repr=False)
     _seen_evidence: set[str] = field(default_factory=set, init=False, repr=False)
@@ -79,6 +85,20 @@ class InvestigationState:
         for missing in observation.missing_evidence:
             if missing and missing not in self.missing_evidence:
                 self.missing_evidence.append(missing)
+
+        if (
+            made_progress
+            and observation.confidence in {"medium", "high"}
+            and observation.evidence_keys
+        ):
+            self.targeted_evidence_count += 1
+
+        if observation.read_class == "targeted" and not observation.success:
+            detail = observation.error or "Targeted read failed."
+            for ref in observation.source_refs or (observation.tool_name,):
+                failed = f"{ref}: {detail}"
+                if failed not in self.failed_targeted_reads:
+                    self.failed_targeted_reads.append(failed)
 
         if observation.timestamp_count and made_progress:
             self.failure_timeline.append({
@@ -125,6 +145,8 @@ class InvestigationState:
                 "failure_timeline": self.failure_timeline[-8:],
                 "missing_evidence": self.missing_evidence[-8:],
                 "alternatives_considered": self.alternatives_considered[-8:],
+                "targeted_evidence_count": self.targeted_evidence_count,
+                "failed_targeted_reads": self.failed_targeted_reads[-8:],
                 "stall_count": self.stall_count,
                 "confidence": self.confidence,
                 "next_action": self.next_action,
@@ -134,6 +156,8 @@ class InvestigationState:
 
     def _has_sufficient_evidence(self) -> bool:
         if len(self.evidence_found) < self.options.min_evidence_items:
+            return False
+        if self.targeted_evidence_count < 1:
             return False
         return bool(self.alternatives_considered or self.missing_evidence)
 
@@ -183,6 +207,10 @@ def observe_tool_result(
         args_key=_stable_hash(arguments),
         result_key=_stable_hash(result or content),
         evidence_keys=evidence_keys,
+        read_class=_read_class(tool_name),
+        source_refs=tuple(_source_refs(tool_name, arguments, result)),
+        entities=tuple(_entities_for_observation(tool_name, arguments, result, content)),
+        success=result.get("ok") is True and not _result_is_non_evidence(result),
         timestamp_count=len(_TIMESTAMP_RE.findall(content)),
         truncated=bool(result.get("tool_result_truncated_by_budget")),
         error=str(result.get("error", "")),
@@ -291,6 +319,66 @@ def _confidence_for_tool_result(
             return "medium"
         return "low"
     return "low"
+
+
+def _read_class(tool_name: str) -> str:
+    if tool_name in {"get_artifact_file", "get_sosreport_file", "get_archive_file"}:
+        return "targeted"
+    if tool_name in {"search_artifacts", "search_sosreport", "search_archive"}:
+        return "search"
+    return "discovery"
+
+
+def _source_refs(
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> list[str]:
+    refs: list[str] = []
+    archive = str(arguments.get("archive_path") or result.get("archive_path") or "")
+    member = str(arguments.get("member_path") or result.get("member_path") or "")
+    path = str(result.get("path") or arguments.get("path") or "")
+    if archive and member:
+        refs.append(f"{archive}::{member}")
+    elif archive:
+        refs.append(archive)
+    if path:
+        refs.append(path)
+    if not refs:
+        refs.append(tool_name)
+    return refs
+
+
+def _entities_for_observation(
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    content: str,
+) -> list[str]:
+    text_parts = [tool_name, json.dumps(arguments, sort_keys=True, default=str)]
+    if result:
+        text_parts.append(json.dumps(result, sort_keys=True, default=str))
+    text_parts.append(content)
+    return _extract_entities(" ".join(text_parts))
+
+
+def _extract_entities(text: str) -> list[str]:
+    entities: set[str] = set()
+    for pattern in (
+        r"\bNode\s+([a-z][a-z0-9-]{2,})\b",
+        r"\bunit[-/]([a-z][a-z0-9-]{2,})[-/]\d+\b",
+        r"\bsosreport-([a-z][a-z0-9-]{2,})[-.]",
+        r"\b([a-z][a-z0-9-]{2,}\.maas)\b",
+    ):
+        entities.update(
+            match.group(1).lower()
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE)
+        )
+    entities.update(
+        archive_host.lower()
+        for archive_host in re.findall(r"\bsosreport-([a-z][a-z0-9-]{2,})", text)
+    )
+    return sorted(entities)
 
 
 def _pack_evidence(path: str, line: Any, excerpt: str) -> str:
