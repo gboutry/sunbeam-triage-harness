@@ -184,7 +184,11 @@ def artifact_tool_definitions() -> list[dict[str, Any]]:
                         "member_path": {"type": "string"},
                         "line_start": {"type": "integer", "minimum": 1},
                         "line_count": {"type": "integer", "minimum": 1},
-                        "max_bytes": {"type": "integer", "minimum": 1, "maximum": MAX_BYTES_LIMIT},
+                        "max_bytes": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": MAX_BYTES_LIMIT,
+                        },
                     },
                 },
             },

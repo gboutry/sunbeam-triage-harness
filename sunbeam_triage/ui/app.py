@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
 from sunbeam_triage.core.config import Config
+from sunbeam_triage.core.markdown_export import render_diagnosis_markdown
 from sunbeam_triage.core.progress import (
     ProgressEvent,
     ProgressSink,
@@ -337,6 +339,7 @@ def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> No
         return
     if session.get("error"):
         st.error(session["error"])
+        _render_markdown_export_button(session)
         _render_download_failures(session)
         if st.button("Retry diagnosis"):
             st.session_state["pending_run"] = {
@@ -348,37 +351,7 @@ def _render_diagnosis_chat(config: Config, session: dict[str, Any] | None) -> No
             st.rerun()
         return
 
-    st.caption(f"{session['uuid']} · {session['model']}")
-    st.subheader(session.get("failed_step") or "Diagnosis result")
-    metadata = _result_metadata(session)
-    if metadata:
-        st.caption(" · ".join(metadata))
-    st.markdown("**Primary finding**")
-    st.write(_primary_finding(session))
-
-    timeline_rows = _failure_timeline_rows(session)
-    if timeline_rows:
-        st.markdown("**Failure timeline**")
-        st.dataframe(timeline_rows, width="stretch", hide_index=True)
-
-    cols = st.columns(3)
-    cols[0].metric("Confidence", session.get("confidence", ""))
-    cols[1].metric("Failed step", session.get("failed_step", ""))
-    cols[2].metric("Chat turns", len(session.get("chat", [])) // 2)
-
-    candidate_rows = _candidate_mechanism_rows(session)
-    st.markdown("**Candidate mechanisms**")
-    if candidate_rows:
-        st.dataframe(candidate_rows, width="stretch", hide_index=True)
-    else:
-        st.caption("No candidate mechanisms recorded.")
-
-    with st.expander("Diagnosis details", expanded=False):
-        _render_download_failures(session)
-        st.markdown("**Failure Surface**")
-        st.write(session.get("failure_surface", ""))
-        st.markdown("**Root Cause**")
-        st.write(session.get("root_cause", ""))
+    _render_diagnosis_result(session)
 
     st.subheader("Conversation")
     for message in session.get("chat", []):
@@ -456,12 +429,65 @@ def _render_context_panel(config: Config, session: dict[str, Any] | None) -> Non
         _render_arena_tab(config)
 
 
+def _render_diagnosis_result(session: dict[str, Any]) -> None:
+    st.caption(f"{session['uuid']} · {session['model']}")
+    st.subheader(session.get("failed_step") or "Diagnosis result")
+    metadata = _result_metadata(session)
+    if metadata:
+        st.caption(" · ".join(metadata))
+    _render_markdown_export_button(session)
+    st.markdown("**Primary finding**")
+    st.write(_primary_finding(session))
+
+    timeline_rows = _failure_timeline_rows(session)
+    if timeline_rows:
+        st.markdown("**Failure timeline**")
+        st.dataframe(timeline_rows, width="stretch", hide_index=True)
+
+    cols = st.columns(3)
+    cols[0].metric("Confidence", session.get("confidence", ""))
+    cols[1].metric("Failed step", session.get("failed_step", ""))
+    cols[2].metric("Chat turns", len(session.get("chat", [])) // 2)
+
+    candidate_rows = _candidate_mechanism_rows(session)
+    st.markdown("**Candidate mechanisms**")
+    if candidate_rows:
+        st.dataframe(candidate_rows, width="stretch", hide_index=True)
+    else:
+        st.caption("No candidate mechanisms recorded.")
+
+    with st.expander("Diagnosis details", expanded=False):
+        _render_download_failures(session)
+        st.markdown("**Failure Surface**")
+        st.write(session.get("failure_surface", ""))
+        st.markdown("**Root Cause**")
+        st.write(session.get("root_cause", ""))
+
+
 def _primary_finding(session: dict[str, Any]) -> str:
     root_cause = str(session.get("root_cause", "")).strip()
     if root_cause:
         return root_cause
     summary = str(session.get("summary", "")).strip()
     return summary or "No diagnosis summary recorded."
+
+
+def _render_markdown_export_button(session: dict[str, Any]) -> None:
+    st.download_button(
+        "Export report + chat",
+        data=render_diagnosis_markdown(session),
+        file_name=_markdown_export_filename(session),
+        mime="text/markdown",
+        key=f"export-markdown-{session.get('session_id', session.get('uuid', 'active'))}",
+    )
+
+
+def _markdown_export_filename(session: dict[str, Any]) -> str:
+    uuid = str(session.get("uuid", "")).strip()
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", uuid).strip(".-")
+    if not safe:
+        return "sunbeam-triage-report.md"
+    return f"sunbeam-triage-{safe}.md"
 
 
 def _result_metadata(session: dict[str, Any]) -> list[str]:

@@ -299,7 +299,9 @@ class TriageUseCases:
             "running",
             "Downloading artifacts",
         )
-        self.mirror_factory(self.config.swift, self.config.paths.artifact_root).mirror_uuid(
+        self.mirror_factory(
+            self.config.swift, self.config.paths.artifact_root
+        ).mirror_uuid(
             request.uuid,
             continue_on_error=True,
         )
@@ -333,12 +335,16 @@ class TriageUseCases:
         progress: ProgressSink | None = None,
         progress_events: list[dict[str, Any]] | None = None,
     ) -> ArenaRunResult:
-        loaded = load_session_record(self.config.paths.artifact_root, request.session_id)
+        loaded = load_session_record(
+            self.config.paths.artifact_root, request.session_id
+        )
         if not loaded:
             raise ValueError("Arena record is missing.")
         arena = loaded["snapshot"]
         models = [str(item.get("model", "")) for item in arena.get("contenders", [])]
-        updated = ArenaRunner(self.config, client_factory=self.client_factory).retry_failed(
+        updated = ArenaRunner(
+            self.config, client_factory=self.client_factory
+        ).retry_failed(
             arena,
             ArenaOptions(
                 models=models,

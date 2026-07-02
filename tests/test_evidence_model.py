@@ -27,8 +27,7 @@ def test_evidence_observation_records_provenance_and_targeted_read():
     assert observation.confidence == "high"
     assert observation.is_targeted is True
     assert observation.to_prompt_line().startswith(
-        "- [failure_surface/high/targeted_read] "
-        "generated/sunbeam/output.log:120-140:"
+        "- [failure_surface/high/targeted_read] generated/sunbeam/output.log:120-140:"
     )
 
 

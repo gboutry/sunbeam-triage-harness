@@ -464,9 +464,7 @@ def test_openrouter_client_validates_report_against_tool_provenance(tmp_path):
                     "call-2",
                     "get_sosreport_file",
                     json.dumps({
-                        "archive_path": (
-                            "generated/sunbeam/sosreport-snaroli.tar.xz"
-                        ),
+                        "archive_path": ("generated/sunbeam/sosreport-snaroli.tar.xz"),
                         "member_path": "var/log/syslog",
                     }),
                 ),

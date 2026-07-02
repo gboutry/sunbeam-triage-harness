@@ -70,7 +70,10 @@ def test_read_text_preview_bounds_large_text_files(tmp_path):
 
 def test_read_text_preview_redacts_secret_values(tmp_path):
     path = tmp_path / "secret.log"
-    path.write_text("Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", encoding="utf-8")
+    path.write_text(
+        "Authorization: Bearer sk-or-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        encoding="utf-8",
+    )
 
     preview = read_text_preview(path)
 
@@ -126,11 +129,7 @@ def test_capturing_http_redacts_payload_and_response_content():
 
     http.post_json(
         "https://openrouter.ai/api/v1/chat/completions",
-        {
-            "messages": [
-                {"role": "user", "content": "OS_PASSWORD=super-secret-value"}
-            ]
-        },
+        {"messages": [{"role": "user", "content": "OS_PASSWORD=super-secret-value"}]},
         {},
     )
 

@@ -17,6 +17,7 @@ def test_evidence_collector_identifies_first_failed_non_cleanup_step():
     assert any("wait timed out" in item.excerpt for item in pack.evidence)
     assert all("Failed to collect files" not in item.excerpt for item in pack.evidence)
     assert any(item.kind == "juju-status" for item in pack.evidence)
+    assert pack.step_selection is not None
     assert pack.step_selection.selected.name == "sunbeam_deploy"
     assert pack.step_selection.confidence == "high"
 
@@ -125,7 +126,11 @@ def test_evidence_collector_records_rejected_cleanup_failures(tmp_path):
                 "name": "Run the pipeline",
                 "steps": [
                     {"name": "sunbeam_deploy", "conclusion": "failure", "number": 1},
-                    {"name": "Report the job to weebl", "conclusion": "failure", "number": 2},
+                    {
+                        "name": "Report the job to weebl",
+                        "conclusion": "failure",
+                        "number": 2,
+                    },
                 ],
             }
         ]
@@ -142,6 +147,7 @@ def test_evidence_collector_records_rejected_cleanup_failures(tmp_path):
     pack = EvidenceCollector(tmp_path, "uuid").collect()
 
     assert pack.failed_step.name == "sunbeam_deploy"
+    assert pack.step_selection is not None
     assert [step.name for step in pack.step_selection.rejected_cleanup] == [
         "Report the job to weebl"
     ]
@@ -172,6 +178,7 @@ def test_evidence_collector_uses_cleanup_only_failure_with_low_confidence(tmp_pa
     pack = EvidenceCollector(tmp_path, "uuid").collect()
 
     assert pack.failed_step.name == "Collect logs"
+    assert pack.step_selection is not None
     assert pack.step_selection.confidence == "low"
 
 

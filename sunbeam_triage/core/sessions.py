@@ -41,7 +41,9 @@ def load_session_record(artifact_root: Path, session_id: str) -> dict[str, Any] 
             "snapshot": redact_data(
                 json.loads(snapshot_path.read_text(encoding="utf-8"))
             ),
-            "events": redact_data(_read_events(_events_path(artifact_root, session_id))),
+            "events": redact_data(
+                _read_events(_events_path(artifact_root, session_id))
+            ),
         }
     legacy_path = _legacy_session_path(artifact_root, session_id)
     if legacy_path.exists():

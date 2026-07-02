@@ -46,7 +46,8 @@ def profile_for_step(name: str) -> StepProfile | None:
 def load_step_profiles() -> dict[str, StepProfile]:
     try:
         text = (
-            resources.files("sunbeam_triage.data")
+            resources
+            .files("sunbeam_triage.data")
             .joinpath("sunbeam_step_profiles.json")
             .read_text(encoding="utf-8")
         )
@@ -65,8 +66,7 @@ def _profile_from_dict(data: dict[str, Any]) -> StepProfile:
         primary_artifacts=tuple(data.get("primary_artifacts", ())),
         probes=tuple(_probe_from_dict(probe) for probe in data.get("probes", ())),
         targeted_reads=tuple(
-            _targeted_read_from_dict(read)
-            for read in data.get("targeted_reads", ())
+            _targeted_read_from_dict(read) for read in data.get("targeted_reads", ())
         ),
         known_patterns=tuple(data.get("known_patterns", ())),
         archive_prefixes=tuple(data.get("archive_prefixes", ())),

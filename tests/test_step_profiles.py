@@ -47,15 +47,11 @@ def test_committed_sunbeam_step_profiles_drop_high_risk_static_probes():
     }
     case_hosts = ("chespin", "behaim", "anonster", "crustle", "ledian.maas")
     patterns = {
-        probe.pattern
-        for profile in STEP_PROFILES.values()
-        for probe in profile.probes
+        probe.pattern for profile in STEP_PROFILES.values() for probe in profile.probes
     }
 
     assert patterns.isdisjoint(risky_patterns)
-    assert not any(
-        host in pattern for host in case_hosts for pattern in patterns
-    )
+    assert not any(host in pattern for host in case_hosts for pattern in patterns)
 
 
 def test_committed_sunbeam_step_profiles_classify_navigation_and_targeted_reads():
@@ -74,8 +70,7 @@ def test_committed_sunbeam_step_profiles_classify_navigation_and_targeted_reads(
         for probe in deploy_profile.probes
     )
     assert any(
-        read.selector == "var/log/syslog$"
-        for read in deploy_profile.targeted_reads
+        read.selector == "var/log/syslog$" for read in deploy_profile.targeted_reads
     )
 
 

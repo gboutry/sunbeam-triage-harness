@@ -24,7 +24,11 @@ class FakeMirror:
         return MirrorManifest(
             uuid=uuid,
             root=Path("unused"),
-            objects=(SwiftObject(name=f"{uuid}/generated/sunbeam/output.log", hash=None, bytes=1),),
+            objects=(
+                SwiftObject(
+                    name=f"{uuid}/generated/sunbeam/output.log", hash=None, bytes=1
+                ),
+            ),
         )
 
 

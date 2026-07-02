@@ -33,9 +33,7 @@ AUTHORIZATION_VALUE = re.compile(
     r"(?i)\b(?P<prefix>authorization\s*[:=]\s*(?:bearer|basic)\s+)"
     r"(?P<value>[A-Za-z0-9._~+/=-]{8,})"
 )
-JWT = re.compile(
-    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\b"
-)
+JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\b")
 KNOWN_TOKEN_PREFIX = re.compile(
     r"\b(?:sk-or-v1-|sk-[A-Za-z0-9]|ghp_|gho_|github_pat_|xox[baprs]-|"
     r"AKIA|ASIA)[A-Za-z0-9_.:-]{12,}\b"

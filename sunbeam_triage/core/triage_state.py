@@ -209,7 +209,9 @@ def observe_tool_result(
         evidence_keys=evidence_keys,
         read_class=_read_class(tool_name),
         source_refs=tuple(_source_refs(tool_name, arguments, result)),
-        entities=tuple(_entities_for_observation(tool_name, arguments, result, content)),
+        entities=tuple(
+            _entities_for_observation(tool_name, arguments, result, content)
+        ),
         success=result.get("ok") is True and not _result_is_non_evidence(result),
         timestamp_count=len(_TIMESTAMP_RE.findall(content)),
         truncated=bool(result.get("tool_result_truncated_by_budget")),

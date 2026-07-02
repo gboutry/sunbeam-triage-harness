@@ -415,6 +415,16 @@ def test_result_helpers_handle_older_sessions_without_v2_fields():
     assert app._primary_finding(session) == "Timed out"
 
 
+def test_markdown_export_filename_is_safe():
+    app = _streamlit_app()
+
+    assert (
+        app._markdown_export_filename({"uuid": "run/with spaces:and/slashes"})
+        == "sunbeam-triage-run-with-spaces-and-slashes.md"
+    )
+    assert app._markdown_export_filename({"uuid": ""}) == "sunbeam-triage-report.md"
+
+
 def test_diagnosis_session_persists_probe_results(tmp_path):
     report = DiagnosisReport(
         summary="Incomplete",
@@ -639,10 +649,7 @@ def test_session_snapshots_are_redacted_on_save_and_legacy_load(tmp_path):
     )
 
     raw_v2 = (
-        artifact_root
-        / ".sunbeam-triage"
-        / "sessions"
-        / "sample-uuid.json"
+        artifact_root / ".sunbeam-triage" / "sessions" / "sample-uuid.json"
     ).read_text(encoding="utf-8")
     assert "super-secret-value" not in raw_v2
     assert "OS_PASSWORD=<redacted>" in raw_v2

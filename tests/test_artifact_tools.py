@@ -223,7 +223,9 @@ def test_search_artifacts_redacts_secret_values(tmp_path):
     root = tmp_path / "uuid"
     path = root / "generated/sunbeam/output.log"
     path.parent.mkdir(parents=True)
-    path.write_text("ERROR token=AbcdEFGH1234567890abcdEFGH1234567890\n", encoding="utf-8")
+    path.write_text(
+        "ERROR token=AbcdEFGH1234567890abcdEFGH1234567890\n", encoding="utf-8"
+    )
 
     result = execute_artifact_tool(
         root,

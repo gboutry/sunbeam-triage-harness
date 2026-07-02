@@ -40,17 +40,14 @@ def extract_profiles(steps_dir: Path) -> dict[str, StepProfile]:
         profiles[name] = StepProfile(
             name=name,
             primary_artifacts=tuple(artifacts),
-            probes=tuple(
-                probe for probe, _targeted_read in specs if probe is not None
-            ),
+            probes=tuple(probe for probe, _targeted_read in specs if probe is not None),
             targeted_reads=tuple(
                 targeted_read
                 for _probe, targeted_read in specs
                 if targeted_read is not None
             ),
             known_patterns=tuple(
-                match.group("name").strip()
-                for match in PATTERN_HEADING.finditer(text)
+                match.group("name").strip() for match in PATTERN_HEADING.finditer(text)
             ),
             source_path=str(path.relative_to(root)),
         )
@@ -184,7 +181,18 @@ def _grep_pattern(line: str) -> str:
         if not word.startswith("-") or word == "-":
             break
         index += 1
-        if word in {"-A", "-B", "-C", "-e", "-f", "--after-context", "--before-context", "--context", "--regexp", "--file"}:
+        if word in {
+            "-A",
+            "-B",
+            "-C",
+            "-e",
+            "-f",
+            "--after-context",
+            "--before-context",
+            "--context",
+            "--regexp",
+            "--file",
+        }:
             if word in {"-e", "--regexp"}:
                 break
             index += 1
