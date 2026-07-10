@@ -31,6 +31,10 @@ class DiagnosisRunRequest:
     uuid: str
     model: str
     budget: str = "default"
+    offline: bool = False
+    refresh: bool = False
+    max_tool_rounds: int | None = None
+    precomputed_report: DiagnosisReport | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,8 @@ class DiagnosisRunResult:
     selected_uuid: str
     clear_attachments: bool = True
     error: str | None = None
+    failed_step_family: str = ""
+    evidence_item_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -120,47 +126,60 @@ class TriageUseCases:
         failed_step = ""
 
         try:
-            _emit_use_case_progress(
-                progress,
-                uuid,
-                "diagnosis",
-                "download",
-                "running",
-                "Downloading artifacts",
-            )
-
-            def show_download(event: dict[str, Any]) -> None:
+            if request.offline:
+                _emit_use_case_progress(
+                    progress,
+                    uuid,
+                    "diagnosis",
+                    "download",
+                    "completed",
+                    "Using already mirrored artifacts",
+                )
+            else:
                 _emit_use_case_progress(
                     progress,
                     uuid,
                     "diagnosis",
                     "download",
                     "running",
-                    (
-                        f"{event['status']} {event['index']}/{event['total']}: "
-                        f"{event['name']}"
-                    ),
-                    warning=str(event["error"]) if event.get("error") else None,
+                    "Downloading artifacts",
                 )
 
-            manifest = self.mirror_factory(
-                run_config.swift,
-                run_config.paths.artifact_root,
-            ).mirror_uuid(
-                uuid,
-                progress=show_download,
-                continue_on_error=True,
-            )
-            _emit_use_case_progress(
-                progress,
-                uuid,
-                "diagnosis",
-                "download",
-                "completed",
-                f"Downloaded or reused {len(manifest.objects)} objects",
-            )
-            if manifest.failures:
-                download_failures = [asdict(item) for item in manifest.failures]
+                def show_download(event: dict[str, Any]) -> None:
+                    _emit_use_case_progress(
+                        progress,
+                        uuid,
+                        "diagnosis",
+                        "download",
+                        "running",
+                        (
+                            f"{event['status']} {event['index']}/{event['total']}: "
+                            f"{event['name']}"
+                        ),
+                        warning=(
+                            str(event["error"]) if event.get("error") else None
+                        ),
+                    )
+
+                manifest = self.mirror_factory(
+                    run_config.swift,
+                    run_config.paths.artifact_root,
+                ).mirror_uuid(
+                    uuid,
+                    refresh=request.refresh,
+                    progress=show_download,
+                    continue_on_error=True,
+                )
+                _emit_use_case_progress(
+                    progress,
+                    uuid,
+                    "diagnosis",
+                    "download",
+                    "completed",
+                    f"Downloaded or reused {len(manifest.objects)} objects",
+                )
+                if manifest.failures:
+                    download_failures = [asdict(item) for item in manifest.failures]
 
             _emit_use_case_progress(
                 progress,
@@ -182,16 +201,23 @@ class TriageUseCases:
                 f"Ran {len(pack.probe_results)} deterministic probes",
             )
 
-            triage_options = _resolve_options(run_config, request.budget)
-            report = llm_client.diagnose(
-                pack.to_prompt_text(),
-                session_id=uuid,
-                artifact_root=artifact_root,
-                max_tool_rounds=triage_options.max_rounds,
-                max_tool_result_chars=triage_options.max_tool_result_chars,
-                triage_options=triage_options,
-                progress=progress,
+            triage_options = _resolve_options(
+                run_config,
+                request.budget,
+                max_tool_rounds=request.max_tool_rounds,
             )
+            if request.precomputed_report is not None:
+                report = request.precomputed_report
+            else:
+                report = llm_client.diagnose(
+                    pack.to_prompt_text(),
+                    session_id=uuid,
+                    artifact_root=artifact_root,
+                    max_tool_rounds=triage_options.max_rounds,
+                    max_tool_result_chars=triage_options.max_tool_result_chars,
+                    triage_options=triage_options,
+                    progress=progress,
+                )
             report = apply_probe_report_policies(
                 report,
                 pack.probe_results,
@@ -215,7 +241,12 @@ class TriageUseCases:
                 progress_events=progress_events,
             )
             persist_diagnosis_session(run_config.paths.artifact_root, session)
-            return DiagnosisRunResult(session=session, selected_uuid=uuid)
+            return DiagnosisRunResult(
+                session=session,
+                selected_uuid=uuid,
+                failed_step_family=pack.failed_step.family,
+                evidence_item_count=len(pack.evidence),
+            )
         except Exception as exc:
             _emit_use_case_progress(
                 progress,
@@ -592,7 +623,12 @@ def _probe_context_lines(pack) -> list[str]:
     return lines
 
 
-def _resolve_options(config: Config, budget: str):
+def _resolve_options(
+    config: Config,
+    budget: str,
+    *,
+    max_tool_rounds: int | None = None,
+):
     return resolve_triage_budget(
         BudgetProfile(
             quick_max_rounds=config.triage.quick_max_rounds,
@@ -603,6 +639,7 @@ def _resolve_options(config: Config, budget: str):
             max_tool_result_chars=config.triage.max_tool_result_chars,
         ),
         budget=_parse_budget(budget),
+        max_tool_rounds=max_tool_rounds,
     )
 
 

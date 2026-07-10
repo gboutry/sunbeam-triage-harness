@@ -5,12 +5,9 @@ import json
 import sys
 
 from ..core.config import Config
-from ..core.evidence import EvidenceCollector
-from ..core.llm import DiagnosisReport, OpenRouterClient
-from ..core.render import render_html
-from ..core.report_policy import apply_probe_report_policies
-from ..core.swift import SwiftMirror
-from ..core.triage_state import BudgetProfile, resolve_triage_budget
+from ..core.llm import DiagnosisReport
+from ..core.progress import ProgressEvent
+from ..core.use_cases import DiagnosisRunRequest, TriageUseCases
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,56 +54,57 @@ def main(argv: list[str] | None = None) -> int:
     )
     _log("model", config.llm.model)
     uuid = args.uuid
-    if not args.offline:
-        _log("stage", f"mirror start uuid={uuid}")
-        mirror = SwiftMirror(config.swift, config.paths.artifact_root)
-        manifest = mirror.mirror_uuid(uuid, refresh=args.refresh)
-        _log("result", f"mirrored_objects={len(manifest.objects)} root={manifest.root}")
-    else:
+    if args.offline:
         _log("stage", "mirror skipped (offline)")
+    else:
+        _log("stage", f"mirror start uuid={uuid}")
 
-    artifact_root = config.paths.artifact_root / uuid
-    _log("stage", f"evidence root={artifact_root}")
-    pack = EvidenceCollector(artifact_root, uuid).collect()
+    precomputed_report = None
+    if args.llm_json:
+        _log("stage", "diagnosis using supplied JSON")
+        precomputed_report = DiagnosisReport.from_dict(json.loads(args.llm_json))
+    else:
+        _log("stage", f"diagnosis requesting model={config.llm.model}")
+
+    progress_events: list[dict[str, object]] = []
+
+    def show_progress(event: ProgressEvent) -> None:
+        progress_events.append(event.to_trace())
+        if event.phase == "evidence" and event.status == "running":
+            _log("stage", f"evidence root={config.paths.artifact_root / uuid}")
+
+    result = TriageUseCases(config).run_diagnosis(
+        DiagnosisRunRequest(
+            uuid=uuid,
+            model=config.llm.model,
+            budget=args.budget,
+            offline=args.offline,
+            refresh=args.refresh,
+            max_tool_rounds=args.max_tool_rounds,
+            precomputed_report=precomputed_report,
+        ),
+        progress=show_progress,
+        progress_events=progress_events,
+    )
+    if result.error:
+        _log("error", result.error)
+        return 1
+
     _log(
         "result",
         (
-            f"failed_step={pack.failed_step.name} "
-            f"family={pack.failed_step.family} evidence_items={len(pack.evidence)}"
-        ),
+            f"failed_step={result.session.get('failed_step', '')} "
+            f"family={result.failed_step_family} "
+            f"evidence_items={result.evidence_item_count}"
+        )
     )
-    if args.llm_json:
-        _log("stage", "diagnosis using supplied JSON")
-        report = DiagnosisReport.from_dict(json.loads(args.llm_json))
-    else:
-        triage_options = resolve_triage_budget(
-            BudgetProfile(
-                quick_max_rounds=config.triage.quick_max_rounds,
-                default_max_rounds=config.triage.default_max_rounds,
-                hard_max_rounds=config.triage.hard_max_rounds,
-                stall_limit=config.triage.stall_limit,
-                min_evidence_items=config.triage.min_evidence_items,
-                max_tool_result_chars=config.triage.max_tool_result_chars,
-            ),
-            budget=args.budget,
-            max_tool_rounds=args.max_tool_rounds,
-        )
-        _log("stage", f"diagnosis requesting model={config.llm.model}")
-        report = OpenRouterClient(config.llm).diagnose(
-            pack.to_prompt_text(),
-            session_id=uuid,
-            artifact_root=artifact_root,
-            max_tool_rounds=triage_options.max_rounds,
-            max_tool_result_chars=triage_options.max_tool_result_chars,
-            triage_options=triage_options,
-        )
-    report = apply_probe_report_policies(report, pack.probe_results, pack.evidence)
-    _log("result", f"confidence={report.confidence} summary={report.summary}")
+    _log(
+        "result",
+        f"confidence={result.session['confidence']} summary={result.session['summary']}",
+    )
 
-    output = config.output_path(uuid)
+    output = result.session["output"]
     _log("stage", f"render output={output}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_html(pack, report), encoding="utf-8")
     print(output)
     return 0
 

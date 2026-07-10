@@ -51,6 +51,14 @@ output_pattern = "{tmp_path}/diagnostics-{{uuid}}.html"
     assert output.exists()
     assert "Offline summary" in output.read_text(encoding="utf-8")
     assert str(output) in result.stdout
+    session_path = (
+        artifact_root / ".sunbeam-triage" / "sessions" / "sample-uuid.json"
+    )
+    assert session_path.exists()
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    assert session["session_type"] == "diagnosis"
+    assert session["summary"] == "Offline summary"
+    assert session["chat"] == []
 
 
 def test_cli_logs_stage_model_and_result(tmp_path):

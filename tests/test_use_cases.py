@@ -94,7 +94,13 @@ def test_run_diagnosis_persists_ui_and_v2_session_snapshots(tmp_path):
     )
 
     result = use_cases.run_diagnosis(
-        DiagnosisRunRequest(uuid="sample-uuid", model="model/a", budget="quick"),
+        DiagnosisRunRequest(
+            uuid="sample-uuid",
+            model="model/a",
+            budget="quick",
+            refresh=True,
+            max_tool_rounds=1,
+        ),
         progress_events=progress_events,
     )
 
@@ -103,7 +109,8 @@ def test_run_diagnosis_persists_ui_and_v2_session_snapshots(tmp_path):
     assert result.clear_attachments is True
     assert (tmp_path / "diagnostics-sample-uuid.html").exists()
     assert mirror.calls[0]["continue_on_error"] is True
-    assert client.diagnose_calls[0]["max_tool_rounds"] == 2
+    assert mirror.calls[0]["refresh"] is True
+    assert client.diagnose_calls[0]["max_tool_rounds"] == 1
     assert client.diagnose_calls[0]["session_id"] == "sample-uuid"
     assert client.diagnose_calls[0]["artifact_root"] == (
         tmp_path / "artifacts" / "sample-uuid"
@@ -113,6 +120,40 @@ def test_run_diagnosis_persists_ui_and_v2_session_snapshots(tmp_path):
     assert loaded is not None
     assert loaded["snapshot"]["session_type"] == "diagnosis"
     assert loaded["snapshot"]["summary"] == "Diagnosis summary"
+
+
+def test_run_diagnosis_offline_skips_mirror_and_uses_precomputed_report(tmp_path):
+    _copy_fixture(tmp_path)
+    config = _config(tmp_path)
+    mirror = FakeMirror()
+    client = FakeClient()
+    report = DiagnosisReport(
+        summary="Precomputed diagnosis",
+        failure_surface="Deploy timeout",
+        confidence="supported",
+        root_cause="Readiness did not converge",
+    )
+    use_cases = TriageUseCases(
+        config,
+        mirror_factory=lambda _swift, _artifact_root: mirror,
+        client_factory=lambda _llm: client,
+    )
+
+    result = use_cases.run_diagnosis(
+        DiagnosisRunRequest(
+            uuid="sample-uuid",
+            model="model/a",
+            offline=True,
+            max_tool_rounds=1,
+            precomputed_report=report,
+        ),
+        progress_events=[],
+    )
+
+    assert mirror.calls == []
+    assert client.diagnose_calls == []
+    assert result.session["summary"] == "Precomputed diagnosis"
+    assert result.evidence_item_count > 0
 
 
 def test_run_diagnosis_preserves_attachments_on_error(tmp_path):
