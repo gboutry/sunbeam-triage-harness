@@ -101,10 +101,78 @@ def run_preflight_probes(root: Path, uuid: str) -> tuple[ProbeResult, ...]:
     del uuid
     root = Path(root)
     return (
+        _run_timeout_outcome_probe(root),
         _run_k8s_not_ready_probe(root),
         _run_juju_lost_unit_probe(root),
         _run_juju_migration_probe(root),
         _run_workload_crash_recovery_probe(root),
+    )
+
+
+def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
+    rel = "generated/sunbeam/output.log"
+    path = root / rel
+    if not path.exists():
+        return ProbeResult(
+            name="timeout_outcome",
+            status="not_applicable",
+            summary="No Sunbeam output log was available.",
+        )
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    timeout_lines = [
+        number
+        for number, line in enumerate(lines, start=1)
+        if re.search(r"wait timed out|TimeoutError", line, re.IGNORECASE)
+    ]
+    if not timeout_lines:
+        return ProbeResult(
+            name="timeout_outcome",
+            status="not_applicable",
+            summary="No timeout failure surface was found.",
+        )
+    first_timeout = min(timeout_lines)
+    completions = [
+        ProbeFinding(
+            category="post_timeout_completion",
+            path=rel,
+            line=number,
+            excerpt=_excerpt(line.strip()),
+        )
+        for number, line in enumerate(lines, start=1)
+        if number > first_timeout
+        and re.search(
+            r"Node joined cluster|Apply complete|Command completed successfully",
+            line,
+            re.IGNORECASE,
+        )
+    ]
+    findings = [
+        ProbeFinding(
+            category="timeout_surface",
+            path=rel,
+            line=timeout_lines[0],
+            excerpt=_excerpt(lines[timeout_lines[0] - 1].strip()),
+        ),
+        *completions[:12],
+        *_later_convergence_findings(root),
+    ]
+    if completions:
+        summary = (
+            "The recorded timeout has post-timeout completion counter-evidence; "
+            "evaluate it as a possible false negative."
+        )
+    else:
+        summary = "A timeout was found without recorded post-timeout completion."
+    return ProbeResult(
+        name="timeout_outcome",
+        status="triggered",
+        summary=summary,
+        findings=findings[:24],
+        missing_evidence=(
+            []
+            if completions
+            else ["No successful remote completion after the timeout was recorded."]
+        ),
     )
 
 
@@ -372,6 +440,9 @@ def _run_juju_migration_probe(root: Path) -> ProbeResult:
                 root, rel, FAILED_MIGRATION_SIGNAL, "failed_migration_signal"
             )
         )
+    archive_findings, archive_failed = _archived_juju_migration_findings(root)
+    findings.extend(archive_findings)
+    failed_findings.extend(archive_failed)
     if failed_findings:
         findings.extend(failed_findings)
     if not findings:
@@ -399,6 +470,51 @@ def _run_juju_migration_probe(root: Path) -> ProbeResult:
         findings=findings[:24],
         missing_evidence=missing,
     )
+
+
+def _archived_juju_migration_findings(
+    root: Path,
+) -> tuple[list[ProbeFinding], list[ProbeFinding]]:
+    lifecycle: list[ProbeFinding] = []
+    failed: list[ProbeFinding] = []
+    for archive_path in sorted(root.rglob("sosreport-*.tar*")):
+        if archive_path.name.endswith(".sha256") or not archive_path.is_file():
+            continue
+        archive_rel = archive_path.relative_to(root).as_posix()
+        with tarfile.open(archive_path, "r:*") as archive:
+            for member in archive.getmembers():
+                normalized = _normalized_member_path(member.name)
+                if (
+                    not member.isfile()
+                    or not normalized
+                    or not normalized.endswith("unit-k8s-0.log")
+                ):
+                    continue
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    continue
+                text = extracted.read(2_000_000).decode("utf-8", errors="replace")
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    stripped = line.strip()
+                    category = ""
+                    if FAILED_MIGRATION_SIGNAL.search(stripped):
+                        category = "failed_migration_signal"
+                    elif MIGRATION_SIGNAL.search(stripped):
+                        category = "migration_event"
+                    if not category:
+                        continue
+                    finding = ProbeFinding(
+                        category=category,
+                        path=f"{archive_rel}:{normalized}",
+                        line=line_number,
+                        excerpt=_excerpt(stripped),
+                    )
+                    (
+                        failed if category == "failed_migration_signal" else lifecycle
+                    ).append(finding)
+                    if len(lifecycle) + len(failed) >= 16:
+                        return lifecycle, failed
+    return lifecycle, failed
 
 
 def _run_workload_crash_recovery_probe(root: Path) -> ProbeResult:

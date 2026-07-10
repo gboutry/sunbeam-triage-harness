@@ -40,7 +40,16 @@ class StepProfile:
 
 
 def profile_for_step(name: str) -> StepProfile | None:
-    return STEP_PROFILES.get(name)
+    normalized = name.strip().lower().replace(" ", "_").replace("-", "_")
+    aliases = {
+        "maas": "sunbeam_maas_deploy",
+        "sunbeam_test_with_validation_plugin_no_features": (
+            "sunbeam_test_with_validation_plugin_no_features"
+        ),
+    }
+    return STEP_PROFILES.get(name) or STEP_PROFILES.get(
+        aliases.get(normalized, normalized)
+    )
 
 
 def load_step_profiles() -> dict[str, StepProfile]:

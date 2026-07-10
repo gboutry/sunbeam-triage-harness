@@ -31,6 +31,14 @@ def diagnosis_system_prompt() -> str:
         "be costly. Set needs_more_evidence to true only when a "
         "likely decisive artifact remains uninspected; if tools "
         "are available, use them before finalizing that response."
+        " Follow this investigation order: inventory artifacts; identify the "
+        "primary failed operation; build an event timeline; locate the earliest "
+        "meaningful error; trace dependent components; compare multiple "
+        "hypotheses; gather supporting and contradicting evidence; then decide "
+        "whether the evidence is sufficient. Treat later healthy state and "
+        "successful remote completion as counter-evidence to a timeout root-cause "
+        "claim. Every supported or confirmed conclusion must cite an inspected "
+        "raw artifact path. Reporting insufficient evidence is a valid result."
     )
 
 

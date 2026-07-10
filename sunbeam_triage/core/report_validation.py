@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 from .llm_exchanges import tool_call_name_and_arguments
@@ -32,6 +33,32 @@ def validate_diagnosis_report(
                 "read tied to the failure surface."
             ),
         )
+
+    if (
+        not was_confirmed
+        and validated.get("confidence") == "supported"
+        and not _has_successful_targeted_evidence(observations)
+    ):
+        _downgrade_supported(validated)
+        _append_unique(
+            validated,
+            "missing_evidence",
+            "Supported confidence requires a successful targeted artifact read.",
+        )
+
+    if validated.get("confidence") in {"confirmed", "supported"}:
+        unresolved = _unresolved_report_evidence(validated, observations)
+        if unresolved:
+            if validated.get("confidence") == "confirmed":
+                _downgrade_confirmed(validated)
+            else:
+                _downgrade_supported(validated)
+            _append_unique(
+                validated,
+                "missing_evidence",
+                "Report citations did not resolve to inspected artifact evidence: "
+                + ", ".join(unresolved[:4]),
+            )
 
     if strong_claim:
         _validate_named_entity_coverage(validated, observations)
@@ -146,6 +173,42 @@ def _downgrade_confirmed(data: dict[str, Any]) -> None:
     for item in data.get("candidate_mechanisms", []) or []:
         if isinstance(item, dict) and item.get("status") == "confirmed":
             item["status"] = "supported"
+
+
+def _downgrade_supported(data: dict[str, Any]) -> None:
+    if data.get("confidence") == "supported":
+        data["confidence"] = "speculative"
+    if data.get("triage_confidence") in {"high", "medium"}:
+        data["triage_confidence"] = "low"
+    data["needs_more_evidence"] = True
+    for item in data.get("candidate_mechanisms", []) or []:
+        if isinstance(item, dict) and item.get("status") == "supported":
+            item["status"] = "speculative"
+
+
+def _unresolved_report_evidence(
+    data: dict[str, Any],
+    observations: list[ToolObservation],
+) -> list[str]:
+    inspected: set[tuple[str, str]] = set()
+    for observation in observations:
+        if not observation.success:
+            continue
+        for key in observation.evidence_keys:
+            try:
+                item = json.loads(key)
+            except (TypeError, ValueError):
+                continue
+            inspected.add((str(item.get("source", "")), str(item.get("location", ""))))
+    unresolved: list[str] = []
+    for item in data.get("evidence", []) or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path", ""))
+        line = "" if item.get("line") is None else str(item.get("line"))
+        if not any(source == path for source, _location in inspected):
+            unresolved.append(f"{path}:{line}".rstrip(":"))
+    return unresolved
 
 
 def _append_unique(data: dict[str, Any], field: str, value: str) -> None:

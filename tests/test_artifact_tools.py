@@ -38,6 +38,7 @@ def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):
     (root / "generated/github-runner").mkdir(parents=True)
     (root / "generated/github-runner/jobs.json").write_text("{}", encoding="utf-8")
     (root / ".sunbeam-triage-manifest.json").write_text("[]", encoding="utf-8")
+    (root / "DIAGNOSTICS.md").write_text("derived conclusion", encoding="utf-8")
     (root / ".sunbeam-triage-ui/sessions").mkdir(parents=True)
     (root / ".sunbeam-triage-ui/sessions/uuid.json").write_text("{}", encoding="utf-8")
     (root / ".sunbeam-triage/sessions").mkdir(parents=True)
@@ -52,6 +53,20 @@ def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):
             {"path": "generated/sunbeam/output.log", "size_bytes": 3},
         ],
     }
+
+
+def test_get_artifact_file_rejects_derived_diagnostics(tmp_path):
+    root = tmp_path / "uuid"
+    (root / "DIAGNOSTICS.md").parent.mkdir(parents=True)
+    (root / "DIAGNOSTICS.md").write_text("derived conclusion", encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "get_artifact_file",
+        {"path": "DIAGNOSTICS.md"},
+    )
+
+    assert result["ok"] is False
 
 
 def test_get_artifact_file_returns_bounded_text(tmp_path):
@@ -94,6 +109,31 @@ def test_get_artifact_file_reads_line_window(tmp_path):
 
     assert result["content"] == "line 2\nline 3"
     assert result["line_start"] == 2
+    assert result["line_count"] == 2
+
+
+def test_get_artifact_file_reads_late_line_window_beyond_byte_budget(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "".join(f"line {number} {'x' * 80}\n" for number in range(1, 1000)),
+        encoding="utf-8",
+    )
+
+    result = execute_artifact_tool(
+        root,
+        "get_artifact_file",
+        {
+            "path": "generated/sunbeam/output.log",
+            "line_start": 900,
+            "line_count": 2,
+            "max_bytes": 200,
+        },
+    )
+
+    assert result["content"].startswith("line 900 ")
+    assert "line 901 " in result["content"]
     assert result["line_count"] == 2
 
 
@@ -217,6 +257,22 @@ def test_search_artifacts_bounds_long_line_excerpts(tmp_path):
 
     assert len(result["matches"][0]["excerpt"]) == 500
     assert result["matches"][0]["excerpt"].endswith("...")
+
+
+def test_search_artifacts_centres_long_excerpt_on_match(tmp_path):
+    root = tmp_path / "uuid"
+    path = root / "generated/sunbeam/output.log"
+    path.parent.mkdir(parents=True)
+    path.write_text(("x" * 900) + " DECISIVE_ERROR " + ("y" * 900), encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "search_artifacts",
+        {"pattern": "DECISIVE_ERROR"},
+    )
+
+    assert "DECISIVE_ERROR" in result["matches"][0]["excerpt"]
+    assert len(result["matches"][0]["excerpt"]) <= 500
 
 
 def test_search_artifacts_redacts_secret_values(tmp_path):

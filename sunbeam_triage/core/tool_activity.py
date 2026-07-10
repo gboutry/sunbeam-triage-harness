@@ -21,6 +21,7 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
     targets: Counter[tuple[str, str]] = Counter()
     tool_result_chars_by_id: dict[str, int] = {}
     tool_result_count_by_id: Counter[str] = Counter()
+    seen_tool_results: set[tuple[str, str]] = set()
 
     for exchange in exchanges:
         request = exchange.get("request", {})
@@ -30,14 +31,16 @@ def analyze_tool_activity(session: dict[str, Any]) -> dict[str, Any]:
             for message in messages
             if isinstance(message, dict) and message.get("role") == "tool"
         ]
-        result_chars = sum(
-            len(str(message.get("content", ""))) for message in tool_results
-        )
-        tool_result_chars += result_chars
-        tool_result_count += len(tool_results)
         for message in tool_results:
             tool_call_id = str(message.get("tool_call_id", ""))
-            content_len = len(str(message.get("content", "")))
+            content = str(message.get("content", ""))
+            identity = (tool_call_id, content)
+            if identity in seen_tool_results:
+                continue
+            seen_tool_results.add(identity)
+            content_len = len(content)
+            tool_result_chars += content_len
+            tool_result_count += 1
             tool_result_chars_by_id[tool_call_id] = content_len
             tool_result_count_by_id[tool_call_id] += 1
             parsed = _parse_json_object(message.get("content"))

@@ -131,3 +131,42 @@ def test_supported_report_with_targeted_failure_surface_evidence_survives():
     assert validated["confidence"] == "supported"
     assert validated["triage_confidence"] == "medium"
     assert validated["needs_more_evidence"] is False
+
+
+def test_supported_report_without_targeted_read_becomes_speculative():
+    report = _base_report(confidence="supported", triage_confidence="medium")
+    observations = [
+        observe_tool_result(
+            "search_artifacts",
+            {"pattern": "snorlax"},
+            '{"ok": true, "matches": [{'
+            '"path": "generated/sunbeam/output.log", "line": 895, '
+            '"excerpt": "Node snorlax is not ready"}]}',
+        )
+    ]
+
+    validated = validate_diagnosis_report(report, observations)
+
+    assert validated["confidence"] == "speculative"
+    assert validated["needs_more_evidence"] is True
+
+
+def test_supported_report_with_unresolved_citation_becomes_speculative():
+    report = _base_report(
+        confidence="supported",
+        triage_confidence="medium",
+        evidence=[{"path": "invented.log", "line": 99, "excerpt": "invented"}],
+    )
+    observations = [
+        observe_tool_result(
+            "get_artifact_file",
+            {"path": "generated/sunbeam/output.log", "line_start": 890},
+            '{"ok": true, "path": "generated/sunbeam/output.log", '
+            '"line_start": 890, "content": "sunbeam cluster join failed\\n"}',
+        )
+    ]
+
+    validated = validate_diagnosis_report(report, observations)
+
+    assert validated["confidence"] == "speculative"
+    assert any("did not resolve" in item for item in validated["missing_evidence"])

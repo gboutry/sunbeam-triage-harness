@@ -57,7 +57,7 @@ def test_evidence_redacts_obvious_secret_values():
     prompt = pack.to_prompt_text()
 
     assert "super-secret-value" not in prompt
-    assert "OS_PASSWORD=<redacted>" in prompt
+    assert "OS_PASSWORD=" not in prompt
 
 
 def test_evidence_redacts_bearer_tokens(tmp_path):
@@ -72,7 +72,7 @@ def test_evidence_redacts_bearer_tokens(tmp_path):
     prompt = pack.to_prompt_text()
 
     assert "sk-or-v1-aaaaaaaa" not in prompt
-    assert "Authorization: Bearer <redacted>" in prompt
+    assert "Authorization: Bearer" not in prompt
 
 
 def test_evidence_collector_uses_sunbeam_artifacts_for_human_named_sunbeam_steps(
@@ -114,6 +114,18 @@ def test_evidence_collector_keeps_generic_steps_generic_without_sunbeam_artifact
 
     assert pack.failed_step.family == "generic"
     assert {item.kind for item in pack.evidence} == {"github-runner"}
+
+
+def test_evidence_prompt_lists_maas_step_profile_primary_artifacts(tmp_path):
+    _write_jobs(tmp_path, failed_step_name="maas")
+    path = tmp_path / "generated/github-runner/run.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("Process completed with exit code 1\n", encoding="utf-8")
+
+    prompt = EvidenceCollector(tmp_path, "uuid").collect().to_prompt_text()
+
+    assert "Step Profile: sunbeam_maas_deploy" in prompt
+    assert "primary_missing=" in prompt
 
 
 def test_evidence_collector_records_rejected_cleanup_failures(tmp_path):

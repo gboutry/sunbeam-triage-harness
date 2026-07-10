@@ -9,8 +9,9 @@ from sunbeam_triage.core.llm import REPORT_SCHEMA, DiagnosisReport, OpenRouterCl
 from sunbeam_triage.core.llm_exchanges import ExchangeRecorder
 from sunbeam_triage.core.llm_schema import REPORT_SCHEMA as SCHEMA_REPORT_SCHEMA
 from sunbeam_triage.core.llm_schema import DiagnosisReport as SchemaDiagnosisReport
-from sunbeam_triage.core.llm_transport import cache_kwargs
-from sunbeam_triage.core.triage_state import TriageLoopOptions
+from sunbeam_triage.core.llm_tool_loop import compact_investigation_messages
+from sunbeam_triage.core.llm_transport import OpenRouterTransport, cache_kwargs
+from sunbeam_triage.core.triage_state import InvestigationState, TriageLoopOptions
 
 
 class FakeSdkResponse:
@@ -79,7 +80,10 @@ class FakeChat:
 
     def send(self, **kwargs):
         self.calls.append(kwargs)
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class FakeSdkClient:
@@ -145,6 +149,47 @@ def test_transport_cache_kwargs_match_existing_model_policy():
         "cache_control": {"type": "ephemeral"}
     }
     assert cache_kwargs("openrouter/auto") == {}
+
+
+def test_transport_retries_one_transient_provider_failure():
+    sdk = FakeSdkClient([
+        TimeoutError("provider timed out"),
+        FakeSdkResponse("ok"),
+    ])
+    transport = OpenRouterTransport(_config(), sdk_client=sdk)
+
+    response = transport.send({"model": "model", "messages": []})
+
+    assert response.choices[0].message.content == "ok"
+    assert len(sdk.chat.calls) == 2
+
+
+def test_transport_does_not_retry_non_transient_provider_failure():
+    sdk = FakeSdkClient(ValueError("invalid request"))
+    transport = OpenRouterTransport(_config(), sdk_client=sdk)
+
+    with pytest.raises(ValueError, match="invalid request"):
+        transport.send({"model": "model", "messages": []})
+
+    assert len(sdk.chat.calls) == 1
+
+
+def test_compact_investigation_messages_preserves_ledger_and_current_round():
+    state = InvestigationState(TriageLoopOptions(max_rounds=2, hard_max_rounds=2))
+    state.evidence_found.append({"source": "decisive.log", "claim": "first error"})
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "initial"},
+        {"role": "tool", "content": "x" * 121_000},
+        {"role": "assistant", "content": "latest"},
+        {"role": "tool", "content": "latest result"},
+    ]
+
+    compacted = compact_investigation_messages(messages, state, current_round_size=2)
+
+    assert len(compacted) == 5
+    assert "decisive.log" in compacted[2]["content"]
+    assert compacted[-2:] == messages[-2:]
 
 
 def test_openrouter_client_requests_structured_diagnosis_with_sdk():
@@ -924,7 +969,8 @@ def test_openrouter_client_retries_diagnosis_when_needs_more_evidence_without_to
     )
 
     assert report.root_cause == "Keystone returned HTTP 502 during Tempest auth."
-    assert report.needs_more_evidence is False
+    assert report.confidence == "speculative"
+    assert report.needs_more_evidence is True
     assert len(sdk.chat.calls) == 3
     assert sdk.chat.calls[0]["tool_choice"] == "auto"
     assert sdk.chat.calls[1]["tool_choice"] == "required"
@@ -1183,9 +1229,9 @@ def test_openrouter_client_downgrades_confirmed_diagnosis_after_tool_budget_fall
         max_tool_rounds=1,
     )
 
-    assert report.confidence == "supported"
+    assert report.confidence == "speculative"
     assert report.needs_more_evidence is True
-    assert report.candidate_mechanisms[0].status == "supported"
+    assert report.candidate_mechanisms[0].status == "speculative"
     assert any("tool budget" in unknown for unknown in report.unknowns)
 
 

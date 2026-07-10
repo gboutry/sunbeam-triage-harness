@@ -20,6 +20,7 @@ sunbeam-triage-cli = "sunbeam_triage.cli:main"
 sunbeam-triage-ui = "sunbeam_triage.ui:main"
 sunbeam-triage-analyze-rounds = "sunbeam_triage.cli.analyze_rounds:main"
 sunbeam-triage-arena = "sunbeam_triage.cli.arena:main"
+sunbeam-triage-eval = "sunbeam_triage.cli.evaluate:main"
 
 [dependency-groups]
 dev = [

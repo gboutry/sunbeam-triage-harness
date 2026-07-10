@@ -11,6 +11,7 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
     results = run_preflight_probes(tmp_path, "uuid")
 
     assert [result.name for result in results] == [
+        "timeout_outcome",
         "k8s_not_ready",
         "juju_lost_unit",
         "juju_migration",
@@ -18,6 +19,23 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
     ]
     assert results[0].status == "not_applicable"
     assert results[0].findings == []
+
+
+def test_timeout_outcome_probe_flags_post_timeout_completion(tmp_path):
+    _write_output(
+        tmp_path,
+        "wait timed out after 1199s\nNode joined cluster: node-2\n",
+    )
+
+    result = _probe_by_name(
+        run_preflight_probes(tmp_path, "uuid"),
+        "timeout_outcome",
+    )
+
+    assert "possible false negative" in result.summary
+    assert any(
+        finding.category == "post_timeout_completion" for finding in result.findings
+    )
 
 
 def test_k8s_not_ready_probe_extracts_output_status_and_later_convergence(tmp_path):
@@ -46,7 +64,7 @@ def test_k8s_not_ready_probe_extracts_output_status_and_later_convergence(tmp_pa
         "kube-system coredns-abc 1/1 Running 0 20m\n",
     )
 
-    result = run_preflight_probes(tmp_path, "uuid")[0]
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "k8s_not_ready")
 
     assert result.status == "triggered"
     assert (
@@ -66,7 +84,7 @@ def test_k8s_not_ready_probe_extracts_embedded_status_from_long_failure_line(tmp
         "message='Waiting for Cluster token', since='29 Jun 2026 16:56:49Z')\")\n",
     )
 
-    result = run_preflight_probes(tmp_path, "uuid")[0]
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "k8s_not_ready")
 
     assert any(
         finding.category == "embedded_status"
@@ -95,7 +113,7 @@ def test_k8s_not_ready_probe_reads_bounded_matching_sosreport_journals(tmp_path)
         },
     )
 
-    result = run_preflight_probes(tmp_path, "uuid")[0]
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "k8s_not_ready")
 
     journal_findings = [
         finding
@@ -134,7 +152,7 @@ def test_k8s_not_ready_probe_infers_host_from_nearby_failed_join_command(tmp_pat
         },
     )
 
-    result = run_preflight_probes(tmp_path, "uuid")[0]
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "k8s_not_ready")
 
     journal_paths = [
         finding.path
@@ -164,7 +182,7 @@ def test_k8s_not_ready_probe_deduplicates_repeated_journal_messages(tmp_path):
         },
     )
 
-    result = run_preflight_probes(tmp_path, "uuid")[0]
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "k8s_not_ready")
 
     journal_findings = [
         finding
@@ -225,6 +243,28 @@ def test_juju_migration_probe_separates_observed_from_failed_migration(tmp_path)
     assert any(
         "No direct failed-migration evidence" in item
         for item in result.missing_evidence
+    )
+
+
+def test_juju_migration_probe_reads_archived_unit_agent_log(tmp_path):
+    archive = tmp_path / "generated/sunbeam/sosreport-node1-2026-06-29-abcd.tar.xz"
+    _write_sosreport(
+        archive,
+        {
+            "sosreport-node1/var/log/juju/unit-k8s-0.log": (
+                "15:07:00 migration phase is now REAP\n"
+                "15:07:01 migration failed; agent.conf left unchanged\n"
+            )
+        },
+    )
+
+    result = _probe_by_name(run_preflight_probes(tmp_path, "uuid"), "juju_migration")
+
+    assert "direct failure evidence" in result.summary
+    assert any(
+        finding.category == "failed_migration_signal"
+        and "unit-k8s-0.log" in finding.path
+        for finding in result.findings
     )
 
 

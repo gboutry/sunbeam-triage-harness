@@ -1,0 +1,77 @@
+[
+  {
+    "uuid": "af305443-426a-42d9-8339-a72ec3af82c9",
+    "phase": "sunbeam_deploy",
+    "manifest_sha256": "78247cfb8b917dfba743d3c586705ffcc3207942e64ecd76eae1d72cf7b81c0c",
+    "accepted_root_causes": ["timeout|false.negative|completed after"],
+    "required_evidence": ["output\\.log.*Node joined cluster"],
+    "counterevidence": ["juju_status.*active|Node joined cluster"],
+    "forbidden_claims": ["CNI.*(?:definitive|root cause)"],
+    "human_steering_required": false
+  },
+  {
+    "uuid": "ab33d190-db4f-47cb-be37-bc04a17b8e73",
+    "phase": "sunbeam_deploy",
+    "manifest_sha256": "8d7ea339ae300472904c62ff20ceee51c829548330254c53cac4809a1039a296",
+    "accepted_root_causes": ["timeout|false.negative|completed after"],
+    "required_evidence": ["output\\.log.*Node joined cluster"],
+    "counterevidence": ["juju_status.*active|Node joined cluster"],
+    "forbidden_claims": ["CNI.*(?:definitive|root cause)"],
+    "human_steering_required": false
+  },
+  {
+    "uuid": "e94fbbed-6b5a-4d55-aafa-2830dde4ba31",
+    "phase": "sunbeam_deploy",
+    "manifest_sha256": "6fa2c4913a9f941089adf424f953d2fe5a28641b843ffbcd4bdb876561d8a818",
+    "accepted_root_causes": ["migration.*(?:failed|REAP)|agent\\.conf left unchanged"],
+    "required_evidence": ["unit-k8s-0\\.log.*migration"],
+    "counterevidence": ["apport\\.log.*signal 11"],
+    "forbidden_claims": ["k8sd crash.*caused.*Juju agent"],
+    "human_steering_required": true
+  },
+  {
+    "uuid": "61c6912e-622e-4373-ae5f-a45e97824bd4",
+    "phase": "sunbeam_deploy",
+    "manifest_sha256": "6fe8f994326ee351c85f91b5f7f1dcd8438c2923d825eae91d70e97b834d14de",
+    "accepted_root_causes": ["CSR|certificate signing request|SAN validation"],
+    "required_evidence": ["juju_debug_log_openstack-machines.*CSR"],
+    "human_steering_required": true
+  },
+  {
+    "uuid": "2a86bfbd-c469-4198-b3db-db74aa6d8692",
+    "phase": "maas",
+    "manifest_sha256": "e9c667e9aeb8736044cd10dfae65915343f8e85d1361609bb1ea4e3ab9bf5674",
+    "accepted_root_causes": ["ifaddresses.*bad call flags"],
+    "required_evidence": ["maas-region-api.*postinst|ifaddresses"],
+    "forbidden_claims": ["DIAGNOSTICS\\.md"],
+    "human_steering_required": true
+  },
+  {
+    "uuid": "89c1539f-2f4b-48f7-ac90-ed0ce017479d",
+    "phase": "sunbeam_deploy",
+    "manifest_sha256": "d2037dbfd7be47b7199cb23fa9c82e9a7f3f83f6642a9a4fcc2a63b43998a6dc",
+    "accepted_root_causes": ["relation|payload.*not ready|insufficient evidence"],
+    "required_evidence": ["cinder-volume.*amqp|mysql-router.*database"],
+    "forbidden_claims": ["Cinder.*caused.*(?:Glance|Nova)"],
+    "exact_root_cause_known": false,
+    "human_steering_required": false
+  },
+  {
+    "uuid": "25b0343a-d9ca-4f46-ab83-0391949ed2f5",
+    "phase": "unknown",
+    "manifest_sha256": "53f06a7ef05509c190c1b3a868334e08a81987913c102bc9d09b381d8d524fa3",
+    "accepted_root_causes": [],
+    "exact_root_cause_known": false,
+    "evidence_sufficient": false,
+    "human_steering_required": false
+  },
+  {
+    "uuid": "a06f425e-0cd4-46c5-8481-7e028f683e45",
+    "phase": "unknown",
+    "manifest_sha256": "0da85e4b8c72fb451afc83430963134a313995e42d0dfd9c8378505b8393be8e",
+    "accepted_root_causes": [],
+    "exact_root_cause_known": false,
+    "evidence_sufficient": false,
+    "human_steering_required": false
+  }
+]

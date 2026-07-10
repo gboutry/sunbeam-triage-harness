@@ -13,7 +13,12 @@ class OpenRouterTransport:
         self.sdk_client = sdk_client
 
     def send(self, request: dict[str, Any]) -> Any:
-        return self.sdk().chat.send(**request)
+        try:
+            return self.sdk().chat.send(**request)
+        except Exception as exc:
+            if not _is_transient_provider_error(exc):
+                raise
+            return self.sdk().chat.send(**request)
 
     def sdk(self) -> Any:
         if self.sdk_client is not None:
@@ -34,3 +39,22 @@ def cache_kwargs(model: str) -> dict[str, Any]:
     if model.startswith("anthropic/"):
         return {"cache_control": {"type": "ephemeral"}}
     return {}
+
+
+def _is_transient_provider_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "timeout",
+            "timed out",
+            "connection",
+            "temporarily unavailable",
+            "rate limit",
+            "status 429",
+            "status 500",
+            "status 502",
+            "status 503",
+            "status 504",
+        )
+    )

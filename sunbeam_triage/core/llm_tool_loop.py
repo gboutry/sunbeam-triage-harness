@@ -40,6 +40,7 @@ TOOL_RESULT_TRUNCATED_MARKER = json.dumps(
     sort_keys=True,
 )
 MAX_TOOL_CALLS_PER_ROUND = 4
+MAX_ACCUMULATED_MESSAGE_CHARS = 120_000
 
 
 class ArtifactToolLoop:
@@ -159,14 +160,20 @@ class ArtifactToolLoop:
                         name, arguments, str(message.get("content", ""))
                     )
                 )
-            request["messages"] = [
-                *request["messages"],
+            previous_messages = request["messages"]
+            current_round_messages = [
                 assistant_tool_message(response),
                 *tool_result_messages,
             ]
+            request["messages"] = [*previous_messages, *current_round_messages]
             if tool_calls_need_targeted_read_nudge(calls):
                 request["messages"].append(targeted_read_nudge_message())
             request["messages"].append(investigation_state_message(state))
+            request["messages"] = compact_investigation_messages(
+                request["messages"],
+                state,
+                current_round_size=len(current_round_messages) + 2,
+            )
             if state.should_finalize():
                 final_request = final_request_with_state(request, state)
                 emit_progress(
@@ -450,3 +457,28 @@ def tool_call_cache_key(tool_call: Any) -> str:
         sort_keys=True,
         default=str,
     )
+
+
+def compact_investigation_messages(
+    messages: list[dict[str, Any]],
+    state: InvestigationState,
+    *,
+    current_round_size: int,
+) -> list[dict[str, Any]]:
+    total_chars = sum(len(str(message.get("content", ""))) for message in messages)
+    if total_chars <= MAX_ACCUMULATED_MESSAGE_CHARS:
+        return messages
+    prefix = messages[:2]
+    suffix = messages[-current_round_size:]
+    return [
+        *prefix,
+        {
+            "role": "user",
+            "content": (
+                "The harness compacted earlier raw tool results to control context "
+                "growth. The following evidence ledger preserves their stable "
+                f"findings and unresolved checks:\n{state.to_prompt_summary()}"
+            ),
+        },
+        *suffix,
+    ]

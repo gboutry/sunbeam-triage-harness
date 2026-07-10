@@ -9,6 +9,7 @@ from typing import Any
 from .evidence_model import EvidenceObservation
 from .probes import ProbeResult, run_preflight_probes
 from .redaction import redact_text
+from .step_profiles import profile_for_step
 
 CLEANUP_STEP_NAMES = {
     "Collect logs",
@@ -23,7 +24,7 @@ CLEANUP_STEP_NAMES = {
 }
 
 ERROR_PATTERNS = re.compile(
-    r"wait timed out|Traceback|CalledProcessError|Broken pipe|"
+    r"\bERROR\b|wait timed out|Traceback|CalledProcessError|Broken pipe|"
     r"Process completed with exit code|Command failed|terraform.*failed",
     re.IGNORECASE,
 )
@@ -118,6 +119,24 @@ class EvidencePack:
         probe_lines = _probe_prompt_lines(self.probe_results)
         if probe_lines:
             parts.extend(["", "Deterministic Probes:", *probe_lines])
+        profile = profile_for_step(self.failed_step.name)
+        if profile is not None:
+            available = [
+                path
+                for path in profile.primary_artifacts
+                if (self.root / path).exists()
+            ]
+            missing = [
+                path
+                for path in profile.primary_artifacts
+                if "<" not in path and not (self.root / path).exists()
+            ]
+            parts.extend([
+                "",
+                f"Step Profile: {profile.name}",
+                *[f"- primary_available={path}" for path in available],
+                *[f"- primary_missing={path}" for path in missing],
+            ])
         text = "\n".join(parts)
         if len(text) > max_chars:
             return text[: max_chars - 200] + "\n\n[Evidence truncated by harness]\n"
@@ -305,8 +324,9 @@ class EvidenceCollector:
         for number, line in enumerate(lines, start=1):
             if (
                 not ERROR_PATTERNS.search(line)
-                and not _contains_redactable_secret(line)
-            ) or NOISE_PATTERNS.search(line):
+                or NOISE_PATTERNS.search(line)
+                or redact_text(line) != line
+            ):
                 continue
             items.append(
                 EvidenceItem(
@@ -342,10 +362,6 @@ class EvidenceCollector:
                     )
                 )
         return items[:30]
-
-
-def _contains_redactable_secret(text: str) -> bool:
-    return redact_text(text) != text
 
 
 def _probe_prompt_lines(probe_results: tuple[ProbeResult, ...]) -> list[str]:

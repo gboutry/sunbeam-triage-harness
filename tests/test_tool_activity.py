@@ -98,3 +98,38 @@ def test_analyze_tool_activity_handles_empty_sessions():
     assert analysis["total_cost"] == 0
     assert analysis["rows"] == []
     assert analysis["warnings"] == []
+
+
+def test_analyze_tool_activity_counts_cumulative_tool_result_once():
+    result = {
+        "role": "tool",
+        "tool_call_id": "call-1",
+        "content": '{"ok": true, "content": "evidence"}',
+    }
+    session = {
+        "uuid": "uuid",
+        "exchanges": [
+            {
+                "request": {"messages": []},
+                "response": {
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {
+                                "name": "get_artifact_file",
+                                "arguments": '{"path": "output.log"}',
+                            },
+                        }
+                    ]
+                },
+            },
+            {"request": {"messages": [result]}, "response": {}},
+            {"request": {"messages": [result]}, "response": {}},
+        ],
+    }
+
+    analysis = analyze_tool_activity(session)
+
+    assert analysis["tool_result_count"] == 1
+    assert analysis["tool_result_chars"] == len(result["content"])
+    assert analysis["rows"][0]["result_count"] == 1

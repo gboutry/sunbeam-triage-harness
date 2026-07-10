@@ -20,12 +20,12 @@ from .sosreport_tools import (
 MANIFEST_NAME = ".sunbeam-triage-manifest.json"
 STORE_DIR_NAME = ".sunbeam-triage"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
+DERIVED_ARTIFACT_NAMES = {"DIAGNOSTICS.md", "triage.html"}
 DEFAULT_MAX_BYTES = 120_000
 MAX_BYTES_LIMIT = 250_000
 DEFAULT_READ_MAX_BYTES = 40_000
 READ_MAX_BYTES_LIMIT = 80_000
 DEFAULT_SEARCH_LIMIT = 50
-SEARCH_FILE_MAX_BYTES = 2_000_000
 SEARCH_EXCERPT_MAX_CHARS = 500
 
 
@@ -394,8 +394,9 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
     line_start = _optional_positive_int(arguments.get("line_start"))
     line_count = _optional_positive_int(arguments.get("line_count"))
     size = path.stat().st_size
-    data = path.read_bytes()
-    if b"\x00" in data[: min(len(data), max_bytes)]:
+    with path.open("rb") as stream:
+        prefix = stream.read(min(size, max_bytes))
+    if b"\x00" in prefix:
         return {
             "ok": False,
             "path": relative.as_posix(),
@@ -403,12 +404,17 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
             "error": "Binary file preview is not available.",
             "binary": True,
         }
-    truncated = len(data) > max_bytes
-    text = data[:max_bytes].decode("utf-8", errors="replace")
     if line_start is not None:
-        lines = text.splitlines()
-        count = line_count if line_count is not None else len(lines)
-        text = "\n".join(lines[line_start - 1 : line_start - 1 + count])
+        text, returned_lines, truncated = _read_line_window(
+            path,
+            line_start=line_start,
+            line_count=line_count,
+            max_bytes=max_bytes,
+        )
+    else:
+        truncated = size > max_bytes
+        text = prefix.decode("utf-8", errors="replace")
+        returned_lines = len(text.splitlines())
     result = {
         "ok": True,
         "path": relative.as_posix(),
@@ -419,9 +425,7 @@ def _get_artifact_file(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
     }
     if line_start is not None:
         result["line_start"] = line_start
-        result["line_count"] = (
-            line_count if line_count is not None else len(text.splitlines())
-        )
+        result["line_count"] = returned_lines
     return result
 
 
@@ -447,21 +451,21 @@ def _search_artifacts(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
         if path_glob and not fnmatch.fnmatch(rel_posix, path_glob):
             continue
         path = root / relative
-        if path.stat().st_size > SEARCH_FILE_MAX_BYTES:
-            continue
-        data = path.read_bytes()
-        if b"\x00" in data[: min(len(data), 4096)]:
-            continue
-        text = data.decode("utf-8", errors="replace")
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if pattern.search(line):
+        with path.open("rb") as stream:
+            if b"\x00" in stream.read(4096):
+                continue
+        with path.open(encoding="utf-8", errors="replace") as stream:
+            for line_number, line in enumerate(stream, start=1):
+                match = pattern.search(line)
+                if match is None:
+                    continue
                 if len(matches) >= limit:
                     truncated = True
                     break
                 matches.append({
                     "path": rel_posix,
                     "line": line_number,
-                    "excerpt": redact_text(_search_excerpt(line)),
+                    "excerpt": redact_text(_search_excerpt(line, match.span())),
                 })
         if truncated:
             break
@@ -519,11 +523,55 @@ def _optional_positive_int(value: Any) -> int | None:
     return parsed
 
 
-def _search_excerpt(line: str) -> str:
+def _search_excerpt(
+    line: str,
+    match_span: tuple[int, int] | None = None,
+) -> str:
     excerpt = line.strip()
     if len(excerpt) <= SEARCH_EXCERPT_MAX_CHARS:
         return excerpt
-    return excerpt[: SEARCH_EXCERPT_MAX_CHARS - 3] + "..."
+    if match_span is None:
+        return excerpt[: SEARCH_EXCERPT_MAX_CHARS - 3] + "..."
+    match_start, match_end = match_span
+    width = SEARCH_EXCERPT_MAX_CHARS - 6
+    centre = (match_start + match_end) // 2
+    start = max(0, centre - width // 2)
+    start = min(start, len(excerpt) - width)
+    return f"...{excerpt[start : start + width]}..."
+
+
+def _read_line_window(
+    path: Path,
+    *,
+    line_start: int,
+    line_count: int | None,
+    max_bytes: int,
+) -> tuple[str, int, bool]:
+    selected: list[str] = []
+    encoded_bytes = 0
+    truncated = False
+    with path.open(encoding="utf-8", errors="replace") as stream:
+        for number, line in enumerate(stream, start=1):
+            if number < line_start:
+                continue
+            if line_count is not None and len(selected) >= line_count:
+                truncated = True
+                break
+            clean_line = line.rstrip("\r\n")
+            encoded = clean_line.encode("utf-8", errors="replace")
+            separator_bytes = 1 if selected else 0
+            if selected and encoded_bytes + separator_bytes + len(encoded) > max_bytes:
+                truncated = True
+                break
+            if not selected and len(encoded) > max_bytes:
+                clean_line = encoded[:max_bytes].decode("utf-8", errors="ignore")
+                encoded = clean_line.encode("utf-8")
+                truncated = True
+            selected.append(clean_line)
+            encoded_bytes += separator_bytes + len(encoded)
+            if truncated:
+                break
+    return "\n".join(selected), len(selected), truncated
 
 
 def _is_unsafe_relative_path(path: Path) -> bool:
@@ -533,6 +581,7 @@ def _is_unsafe_relative_path(path: Path) -> bool:
 def _is_internal_path(path: Path) -> bool:
     return (
         path.name == MANIFEST_NAME
+        or path.name in DERIVED_ARTIFACT_NAMES
         or STORE_DIR_NAME in path.parts
         or SESSION_DIR_NAME in path.parts
     )

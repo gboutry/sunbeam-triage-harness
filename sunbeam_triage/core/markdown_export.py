@@ -43,16 +43,14 @@ def _diagnosis_lines(session: dict[str, Any]) -> list[str]:
         ("Failure surface", session.get("failure_surface")),
         ("Root cause", session.get("root_cause")),
     ]
-    lines = [
-        f"**{label}:** {_text(value)}"
-        for label, value in fields
-        if _text(value)
-    ]
+    lines = [f"**{label}:** {_text(value)}" for label, value in fields if _text(value)]
     return lines or ["No diagnosis summary recorded."]
 
 
 def _evidence_section(session: dict[str, Any]) -> list[str]:
-    evidence = [item for item in _items(session.get("evidence")) if isinstance(item, dict)]
+    evidence = [
+        item for item in _items(session.get("evidence")) if isinstance(item, dict)
+    ]
     if not evidence:
         return []
     lines = ["## Evidence"]
@@ -95,7 +93,7 @@ def _source_ref(item: dict[str, Any]) -> str:
     if not path:
         return ""
     line = item.get("line")
-    if line is None or line == "":
+    if line is None or not line:
         return _escape_code_span(path)
     return _escape_code_span(f"{path}:{line}")
 
