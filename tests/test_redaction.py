@@ -58,6 +58,11 @@ def test_redact_text_masks_sunbeam_enable_pro_cli_tokens():
         "sunbeam enable pro optional-token-1234567890abcdef",
         "sunbeam enable pro --token optional-token-1234567890abcdef --attach",
         "sunbeam enable pro --contract-id contract optional-token-1234567890abcdef",
+        "sunbeam enable -m manifest.yaml pro AbCd12EfGh34IjKl56MnOpQr78St",
+        (
+            "['sunbeam', 'enable', '-m', 'manifest.yaml', 'pro', "
+            "'AbCd12EfGh34IjKl56MnOpQr78St']"
+        ),
     ])
 
     redacted = redact_text(text)
@@ -66,6 +71,8 @@ def test_redact_text_masks_sunbeam_enable_pro_cli_tokens():
     assert "sunbeam enable pro <redacted>" in redacted
     assert "sunbeam enable pro --token <redacted> --attach" in redacted
     assert "sunbeam enable pro --contract-id contract <redacted>" in redacted
+    assert "AbCd12EfGh34IjKl56MnOpQr78St" not in redacted
+    assert "sunbeam enable -m manifest.yaml pro <redacted>" in redacted
 
 
 def test_redact_text_ignores_malformed_url_like_log_lines():
@@ -74,3 +81,16 @@ def test_redact_text_ignores_malformed_url_like_log_lines():
     redacted = redact_text(text)
 
     assert "http://squid.internal:3128" in redacted
+
+
+def test_redact_text_is_idempotent_for_json_model_responses():
+    text = (
+        '{"summary": "sunbeam enable -m manifest.yaml pro '
+        'AbCd12EfGh34IjKl56MnOpQr78St failed", '
+        '"evidence": "TimeoutError wait timed out after 299.9s"}'
+    )
+
+    once = redact_text(text)
+
+    assert redact_text(once) == once
+    assert "TimeoutError" in once

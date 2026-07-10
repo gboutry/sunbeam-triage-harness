@@ -459,6 +459,10 @@ def test_diagnosis_session_persists_probe_results(tmp_path):
     )
 
     assert session["probe_results"] == [probe.to_dict()]
+    assert session["investigation_status"] == "completed"
+    assert session["verdict_source"] == "model"
+    assert session["applied_policy_ids"] == []
+    assert session["tool_activity"]["tool_call_count"] == 0
 
 
 def test_append_progress_event_records_concise_trace():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from operator import itemgetter
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,14 @@ from .redaction import redact_data
 
 STORE_DIR_NAME = ".sunbeam-triage"
 SESSION_DIR_NAME = ".sunbeam-triage-ui"
+
+
+@dataclass(frozen=True)
+class SessionScrubResult:
+    scanned: int
+    changed: int
+    unchanged: int
+    malformed: tuple[str, ...]
 
 
 def save_session_snapshot(artifact_root: Path, snapshot: dict[str, Any]) -> Path:
@@ -88,6 +97,75 @@ def export_judged_arenas(artifact_root: Path, output: Path) -> int:
             stream.write("\n")
             count += 1
     return count
+
+
+def scrub_session_store(
+    artifact_root: Path,
+    *,
+    dry_run: bool = False,
+) -> SessionScrubResult:
+    """
+    Redact secrets already persisted in canonical and legacy session stores.
+
+    Returns:
+        Counts for scanned, changed, unchanged, and malformed records.
+
+    """
+    root = Path(artifact_root)
+    paths = sorted([
+        *_sessions_dir(root).glob("*.json"),
+        *_events_dir(root).glob("*.jsonl"),
+        *_legacy_sessions_dir(root).glob("*.json"),
+    ])
+    changed = 0
+    malformed: list[str] = []
+    for path in paths:
+        try:
+            original, redacted = _redacted_session_file(path)
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            malformed.append(str(path))
+            continue
+        if original == redacted:
+            continue
+        changed += 1
+        if not dry_run:
+            _atomic_write_text(path, redacted)
+    return SessionScrubResult(
+        scanned=len(paths),
+        changed=changed,
+        unchanged=len(paths) - changed - len(malformed),
+        malformed=tuple(malformed),
+    )
+
+
+def _redacted_session_file(path: Path) -> tuple[str, str]:
+    original = path.read_text(encoding="utf-8")
+    if path.suffix == ".jsonl":
+        lines = original.splitlines()
+        values = [json.loads(line) for line in lines if line.strip()]
+        redacted_values = [redact_data(value) for value in values]
+        if values == redacted_values:
+            return original, original
+        rendered = "\n".join(
+            json.dumps(value, sort_keys=True) for value in redacted_values
+        )
+        return original, rendered + ("\n" if original.endswith("\n") else "")
+    value = json.loads(original)
+    redacted = redact_data(value)
+    if value == redacted:
+        return original, original
+    return original, json.dumps(redacted, indent=2, sort_keys=True)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    mode = path.stat().st_mode
+    temporary = path.with_name(f".{path.name}.scrub.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        temporary.chmod(mode)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _session_summary(snapshot: dict[str, Any]) -> dict[str, Any]:

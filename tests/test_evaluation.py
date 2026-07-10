@@ -34,7 +34,28 @@ def test_score_session_requires_accepted_cause_and_cited_evidence():
 
     assert score["root_cause_accurate"] is True
     assert score["required_evidence_coverage"] == 1.0
+    assert score["tool_protocol_compliant"] is True
+    assert score["targeted_read_performed"] is False
+    assert score["secret_free"] is True
     assert score["passed"] is True
+
+
+def test_score_session_rejects_model_tool_protocol_errors():
+    case = EvaluationCase(
+        uuid="uuid",
+        phase="deploy",
+        manifest_sha256="hash",
+        accepted_root_causes=("apt-get update",),
+    )
+
+    score = score_session(case, {
+        "root_cause": "apt-get update failed",
+        "evidence": [{"path": "unit.log", "line": 1, "excerpt": "failed"}],
+        "error_type": "model_tool_protocol",
+    })
+
+    assert score["tool_protocol_compliant"] is False
+    assert score["passed"] is False
 
 
 def test_unknown_case_rewards_explicit_insufficient_evidence():

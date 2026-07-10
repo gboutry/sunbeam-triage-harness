@@ -494,6 +494,12 @@ def _result_metadata(session: dict[str, Any]) -> list[str]:
     metadata = []
     triage_confidence = str(session.get("triage_confidence", "")).strip()
     stop_reason = str(session.get("stop_reason", "")).strip()
+    investigation_status = str(session.get("investigation_status", "")).strip()
+    verdict_source = str(session.get("verdict_source", "")).strip()
+    if investigation_status:
+        metadata.append(f"investigation: {investigation_status}")
+    if verdict_source:
+        metadata.append(f"verdict source: {verdict_source}")
     if triage_confidence and triage_confidence != "unknown":
         metadata.append(f"triage confidence: {triage_confidence}")
     if stop_reason:
@@ -567,6 +573,16 @@ def _render_arena_tab(config: Config) -> None:
     for contender in arena.get("contenders", []):
         label = _arena_contender_label(contender, reveal_model=reveal)
         with st.expander(label, expanded=True):
+            provenance = " · ".join(
+                value
+                for value in (
+                    str(contender.get("investigation_status", "")),
+                    str(contender.get("verdict_source", "")),
+                )
+                if value
+            )
+            if provenance:
+                st.caption(provenance)
             if contender.get("status") != "completed":
                 st.error(contender.get("error", "Contender failed."))
                 continue

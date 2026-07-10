@@ -1,3 +1,5 @@
+import pytest
+
 from sunbeam_triage.core.report_validation import validate_diagnosis_report
 from sunbeam_triage.core.triage_state import observe_tool_result
 
@@ -34,6 +36,11 @@ def _base_report(**overrides):
     }
     report.update(overrides)
     return report
+
+
+def test_report_validation_rejects_placeholder_diagnosis_fields():
+    with pytest.raises(ValueError, match="placeholder text for root_cause"):
+        validate_diagnosis_report(_base_report(root_cause="..."), [])
 
 
 def test_confirmed_report_without_targeted_read_is_downgraded():

@@ -6,6 +6,7 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
+from .juju_unit_tools import resolve_juju_unit
 from .redaction import redact_text
 from .sosreport_tools import (
     get_archive_file,
@@ -324,6 +325,29 @@ def artifact_tool_definitions() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "resolve_juju_unit",
+                "description": (
+                    "Resolve a failing Juju unit to its principal, machine, host, "
+                    "matching sosreport, and expected unit log. Use the returned "
+                    "archive and member with search_sosreport or get_sosreport_file; "
+                    "do not guess the bootstrap host."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["unit"],
+                    "properties": {
+                        "unit": {
+                            "type": "string",
+                            "description": "Juju unit name, for example ubuntu-pro/10.",
+                        }
+                    },
+                },
+            },
+        },
     ]
 
 
@@ -332,6 +356,8 @@ def execute_artifact_tool(
     name: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
+    if name == "resolve_juju_unit":
+        return resolve_juju_unit(root, arguments)
     if name == "list_artifact_files":
         return _list_artifact_files(root)
     if name == "get_artifact_file":

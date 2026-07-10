@@ -5,6 +5,7 @@ import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .juju_unit_tools import find_juju_error_units
 from .redaction import redact_text
 
 K8S_NOT_READY = re.compile(
@@ -123,6 +124,50 @@ def run_preflight_probes(root: Path, uuid: str) -> tuple[ProbeResult, ...]:
         _run_package_install_failure_probe(root),
         _run_relation_blockers_probe(root),
         _run_workload_crash_recovery_probe(root),
+        _run_juju_error_unit_probe(root),
+    )
+
+
+def _run_juju_error_unit_probe(root: Path) -> ProbeResult:
+    units = find_juju_error_units(root)
+    if not units:
+        return ProbeResult(
+            name="juju_error_units",
+            status="not_applicable",
+            summary="No mapped Juju error units were found in final status.",
+        )
+    findings: list[ProbeFinding] = []
+    missing: list[str] = []
+    for unit in units[:12]:
+        findings.append(ProbeFinding(
+            category="unit_failure",
+            path=str(unit["status_path"]),
+            line=unit.get("status_line"),
+            excerpt=str(unit["status_excerpt"]),
+        ))
+        suggested = list(unit.get("suggested_members", []))
+        if suggested:
+            target = suggested[0]
+            findings.append(ProbeFinding(
+                category="unit_log_target",
+                path=f"{target['archive_path']}::{target['member_path']}",
+                line=None,
+                excerpt=(
+                    f"{unit['unit']} maps to machine {unit['machine_id']} on "
+                    f"{unit['hostname']}; inspect this unit log before assigning cause."
+                ),
+            ))
+        else:
+            missing.append(
+                f"No unit log target was found for {unit['unit']} on "
+                f"{unit.get('hostname') or 'an unknown host'}."
+            )
+    return ProbeResult(
+        name="juju_error_units",
+        status="triggered",
+        summary="Final Juju error units were mapped to host-specific evidence targets.",
+        findings=findings[:24],
+        missing_evidence=missing,
     )
 
 

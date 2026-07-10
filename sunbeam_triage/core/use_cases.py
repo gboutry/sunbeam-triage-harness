@@ -10,13 +10,14 @@ from typing import Any
 from .arena import ArenaOptions, ArenaRunner
 from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
-from .llm import DiagnosisReport, OpenRouterClient
+from .llm import DiagnosisReport, ModelToolProtocolError, OpenRouterClient
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_data, redact_text
 from .render import render_html
 from .report_policy import apply_probe_report_policies
 from .sessions import append_session_event, load_session_record, save_session_snapshot
 from .swift import SwiftConfig, SwiftMirror
+from .tool_activity import analyze_tool_activity
 from .triage_state import (
     BudgetName,
     BudgetProfile,
@@ -115,6 +116,8 @@ class TriageUseCases:
         artifact_root = run_config.paths.artifact_root / uuid
         llm_client = self.client_factory(run_config.llm)
         download_failures: list[dict[str, Any]] = []
+        probe_results: list[Any] = []
+        failed_step = ""
 
         try:
             _emit_use_case_progress(
@@ -168,6 +171,8 @@ class TriageUseCases:
                 "Collecting evidence",
             )
             pack = self.evidence_collector_factory(artifact_root, uuid).collect()
+            probe_results = list(pack.probe_results)
+            failed_step = pack.failed_step.name
             _emit_use_case_progress(
                 progress,
                 uuid,
@@ -229,10 +234,29 @@ class TriageUseCases:
                 "updated_at": _now(),
                 "artifact_root": str(artifact_root),
                 "error": str(exc),
+                "error_type": (
+                    exc.code
+                    if isinstance(exc, ModelToolProtocolError)
+                    else "provider_or_harness_error"
+                ),
+                "investigation_status": (
+                    "model_protocol_error"
+                    if isinstance(exc, ModelToolProtocolError)
+                    else "provider_error"
+                ),
+                "verdict_source": "none",
                 "chat": [],
                 "exchanges": llm_client.exchanges,
                 "download_failures": download_failures,
+                "failed_step": failed_step,
+                "probe_results": [
+                    result.to_dict() if hasattr(result, "to_dict") else result
+                    for result in probe_results
+                ],
                 "progress_events": list(progress_events or []),
+                "tool_activity": analyze_tool_activity({
+                    "exchanges": llm_client.exchanges
+                }),
             }
             persist_diagnosis_session(run_config.paths.artifact_root, session)
             return DiagnosisRunResult(
@@ -408,6 +432,15 @@ def session_from_diagnosis(
     probe_results: Any | None = None,
     progress_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    activity = analyze_tool_activity({"exchanges": exchanges})
+    deterministic = report.stop_reason.startswith("deterministic_")
+    verdict_source = (
+        "hybrid"
+        if deterministic and activity["tool_call_count"]
+        else "deterministic_policy"
+        if deterministic
+        else "model"
+    )
     return redact_data({
         "uuid": uuid,
         "model": model,
@@ -432,6 +465,10 @@ def session_from_diagnosis(
         ],
         "missing_evidence": report.missing_evidence,
         "stop_reason": report.stop_reason,
+        "investigation_status": "completed",
+        "verdict_source": verdict_source,
+        "applied_policy_ids": [report.stop_reason] if deterministic else [],
+        "tool_activity": activity,
         "chat": [],
         "exchanges": exchanges,
         "download_failures": download_failures,

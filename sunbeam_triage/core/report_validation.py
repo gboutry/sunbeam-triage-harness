@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Any
 
 from .llm_exchanges import tool_call_name_and_arguments
@@ -12,6 +13,7 @@ def validate_diagnosis_report(
     data: dict[str, Any],
     observations: list[ToolObservation],
 ) -> dict[str, Any]:
+    _reject_placeholder_fields(data)
     validated = copy.deepcopy(data)
     was_confirmed = validated.get("confidence") == "confirmed"
     strong_claim = was_confirmed or any(
@@ -65,6 +67,13 @@ def validate_diagnosis_report(
         _record_failed_targeted_reads(validated, observations)
 
     return validated
+
+
+def _reject_placeholder_fields(data: dict[str, Any]) -> None:
+    for field in ("summary", "failure_surface", "root_cause"):
+        value = str(data.get(field, "")).strip()
+        if value and re.fullmatch(r"[.?!_\-]+", value):
+            raise ValueError(f"Model returned placeholder text for {field}")
 
 
 def observations_from_exchanges(

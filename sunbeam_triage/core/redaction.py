@@ -10,15 +10,21 @@ PRIVATE_KEY_BLOCK = re.compile(
     r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
     re.DOTALL,
 )
+SUNBEAM_ENABLE_PRO_PREFIX = (
+    r"\bsunbeam\s+enable\b[^\n`'\"]{0,200}?\bpro\b"
+)
 SUNBEAM_ENABLE_PRO_TOKEN_OPTION = re.compile(
-    r"(?P<prefix>\bsunbeam\s+enable\s+pro\b(?P<args>[^\n]*?)--token\s+)"
+    rf"(?P<prefix>{SUNBEAM_ENABLE_PRO_PREFIX}[^\n`'\"]{{0,120}}?--token\s+)"
+    r"(?P<value>\S+)"
+)
+SUNBEAM_ENABLE_PRO_CONTRACT = re.compile(
+    rf"(?P<prefix>{SUNBEAM_ENABLE_PRO_PREFIX}\s+--contract-id\s+\S+\s+)"
     r"(?P<value>\S+)"
 )
 SUNBEAM_ENABLE_PRO_POSITIONAL = re.compile(
-    r"(?P<prefix>\bsunbeam\s+enable\s+pro\b(?P<args>[^\n]*?))"
-    r"(?P<value>\S*(?:token|[A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z]|"
-    r"[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[a-z])\S{12,})"
-    r"(?P<suffix>\s*|$)"
+    rf"(?P<prefix>{SUNBEAM_ENABLE_PRO_PREFIX}\s+)"
+    r"(?P<value>[A-Za-z0-9][A-Za-z0-9_+=-]{11,})"
+    r"(?P<suffix>\s*|$|(?=[`'\",]))"
 )
 SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b"
@@ -38,7 +44,7 @@ KNOWN_TOKEN_PREFIX = re.compile(
     r"\b(?:sk-or-v1-|sk-[A-Za-z0-9]|ghp_|gho_|github_pat_|xox[baprs]-|"
     r"AKIA|ASIA)[A-Za-z0-9_.:-]{12,}\b"
 )
-LONG_MIXED_TOKEN = re.compile(r"\b[A-Za-z0-9_+=]{32,}\b")
+LONG_MIXED_TOKEN = re.compile(r"\b[A-Za-z0-9_+=]{24,}\b")
 URL_WITH_CREDENTIALS = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>'\"]+")
 
 
@@ -48,7 +54,16 @@ def redact_text(text: str) -> str:
         lambda match: f"{match.group('prefix')}<redacted>",
         redacted,
     )
-    redacted = SUNBEAM_ENABLE_PRO_POSITIONAL.sub(_redact_sunbeam_enable_pro, redacted)
+    redacted = SUNBEAM_ENABLE_PRO_CONTRACT.sub(
+        lambda match: f"{match.group('prefix')}<redacted>",
+        redacted,
+    )
+    redacted = SUNBEAM_ENABLE_PRO_POSITIONAL.sub(
+        lambda match: (
+            f"{match.group('prefix')}<redacted>{match.group('suffix')}"
+        ),
+        redacted,
+    )
     redacted = SECRET_ASSIGNMENT.sub(_redact_secret_assignment, redacted)
     redacted = AUTHORIZATION_VALUE.sub(
         lambda match: f"{match.group('prefix')}<redacted>",
@@ -79,13 +94,6 @@ def _redact_secret_assignment(match: re.Match[str]) -> str:
         f"{match.group('key')}{match.group('sep')}"
         f"{match.group('quote')}<redacted>{match.group('quote')}"
     )
-
-
-def _redact_sunbeam_enable_pro(match: re.Match[str]) -> str:
-    args = match.group("args")
-    if args.rstrip().endswith("--token"):
-        return match.group(0)
-    return f"{match.group('prefix')}<redacted>{match.group('suffix')}"
 
 
 def _redact_url_credentials(match: re.Match[str]) -> str:

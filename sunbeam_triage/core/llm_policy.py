@@ -18,6 +18,7 @@ TARGETED_READ_TOOLS = {
     "get_sosreport_file",
 }
 DISCOVERY_TOOLS = {
+    "resolve_juju_unit",
     "list_artifact_files",
     "list_archive_files",
     "list_sosreports",

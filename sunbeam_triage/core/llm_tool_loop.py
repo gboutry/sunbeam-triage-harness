@@ -43,6 +43,18 @@ MAX_TOOL_CALLS_PER_ROUND = 4
 MAX_ACCUMULATED_MESSAGE_CHARS = 120_000
 
 
+class ModelToolProtocolError(RuntimeError):
+    code = "model_tool_protocol"
+
+    def __init__(self, model: str, tool_choice: str, exchange_count: int):
+        self.model = model
+        self.tool_choice = tool_choice
+        self.exchange_count = exchange_count
+        super().__init__(
+            f"Model {model} returned no tool call while tool_choice={tool_choice}"
+        )
+
+
 class ArtifactToolLoop:
     def __init__(
         self,
@@ -92,6 +104,7 @@ class ArtifactToolLoop:
         )
         state = InvestigationState(options=options)
         seen_tool_call_keys: set[str] = set()
+        required_tool_observed = False
         request = {
             **request,
             "tools": artifact_tool_definitions(),
@@ -110,6 +123,15 @@ class ArtifactToolLoop:
             self.record_exchange(request, response)
             calls = tool_calls(response)
             if not calls:
+                if tool_choice == "required" and not required_tool_observed:
+                    _raise_required_tool_error(
+                        request=request,
+                        progress=progress,
+                        run_id=run_id,
+                        run_type=run_type,
+                        contender_id=contender_id,
+                        round_number=round_number,
+                    )
                 emit_completed(
                     progress,
                     response,
@@ -118,6 +140,7 @@ class ArtifactToolLoop:
                     contender_id=contender_id,
                 )
                 return response
+            required_tool_observed = True
             for tool_call in calls:
                 emit_progress(
                     progress,
@@ -240,6 +263,36 @@ class ArtifactToolLoop:
             contender_id=contender_id,
         )
         return response
+
+
+def _raise_required_tool_error(
+    *,
+    request: dict[str, Any],
+    progress: ProgressSink | None,
+    run_id: str,
+    run_type: str,
+    contender_id: str | None,
+    round_number: int,
+) -> None:
+    error = ModelToolProtocolError(
+        str(request.get("model", "unknown")),
+        "required",
+        round_number,
+    )
+    emit_progress(
+        progress,
+        ProgressEvent(
+            run_id=run_id,
+            run_type=run_type,
+            phase="model_protocol_error",
+            status="failed",
+            message=str(error),
+            contender_id=contender_id,
+            round_number=round_number,
+            warning=error.code,
+        ),
+    )
+    raise error
 
 
 def emit_model_request(

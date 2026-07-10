@@ -1,4 +1,5 @@
 import io
+import json
 import tarfile
 from pathlib import Path
 
@@ -22,13 +23,51 @@ def test_artifact_tool_definitions_warn_that_file_reads_are_costly():
         "list_sosreport_files",
         "search_sosreport",
         "get_sosreport_file",
+        "resolve_juju_unit",
     ]
     read_description = tools[1]["function"]["description"]
     assert "costly" in read_description
     assert "not first" in read_description
-    sos_read_description = tools[-1]["function"]["description"]
+    sos_read_description = tools[-2]["function"]["description"]
     assert "costly" in sos_read_description
     assert "search_sosreport" in sos_read_description
+
+
+def test_resolve_juju_unit_maps_subordinate_to_host_sosreport(tmp_path):
+    root = tmp_path / "uuid"
+    generated = root / "generated/sunbeam"
+    generated.mkdir(parents=True)
+    (generated / "juju_status_openstack-machines.txt").write_text(
+        "sunbeam-machine/3 active idle 3 10.241.4.23\n"
+        "  ubuntu-pro/10 error idle 10.241.4.23 hook failed: config-changed\n"
+    )
+    (generated / "juju_machines_openstack-machines.json").write_text(json.dumps({
+        "machines": {
+            "3": {
+                "hostname": "surskit",
+                "ip-addresses": ["10.241.4.23"],
+            }
+        }
+    }))
+    archive_path = generated / "sosreport-surskit-2026-07-08-test.tar.xz"
+    with tarfile.open(archive_path, "w:xz") as archive:
+        content = b"apt-get update failed\n"
+        info = tarfile.TarInfo(
+            "sosreport-surskit/var/log/juju/unit-ubuntu-pro-10.log"
+        )
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+
+    result = execute_artifact_tool(root, "resolve_juju_unit", {"unit": "ubuntu-pro/10"})
+
+    assert result["ok"] is True
+    assert result["principal"] == "sunbeam-machine/3"
+    assert result["machine_id"] == "3"
+    assert result["hostname"] == "surskit"
+    assert result["suggested_members"] == [{
+        "archive_path": "generated/sunbeam/sosreport-surskit-2026-07-08-test.tar.xz",
+        "member_path": "var/log/juju/unit-ubuntu-pro-10.log",
+    }]
 
 
 def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):

@@ -73,5 +73,27 @@
     "exact_root_cause_known": false,
     "evidence_sufficient": false,
     "human_steering_required": false
+  },
+  {
+    "uuid": "fc7b512c-9892-47dd-b146-4e30ca0f1446",
+    "phase": "sunbeam_enable_plugins_all",
+    "manifest_sha256": "ed18c54ebf51eb6f90dc07964ae291f15710c8a9868d1d055adddc756ea9e3c9",
+    "accepted_root_causes": [
+      "expired.*HPE.*(?:GPG|signing).*key|EXPKEYSIG.*C208ADDE26C2B797"
+    ],
+    "required_evidence": [
+      "unit-ubuntu-pro-10\\.log.*apt-get.*update.*exit status 100",
+      "unit-hardware-observer-7\\.log.*EXPKEYSIG"
+    ],
+    "counterevidence": [
+      "ubuntu-pro/10.*config-changed",
+      "hardware-observer/7.*install"
+    ],
+    "forbidden_claims": [
+      "snap install",
+      "invalid.*(?:Pro )?token",
+      "jasperoid.*ubuntu-pro/10"
+    ],
+    "human_steering_required": true
   }
 ]

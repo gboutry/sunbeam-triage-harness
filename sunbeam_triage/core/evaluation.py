@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .llm_policy import TARGETED_READ_TOOLS
+from .redaction import redact_data
+from .tool_activity import analyze_tool_activity
+
 
 @dataclass(frozen=True)
 class EvaluationCase:
@@ -89,6 +93,16 @@ def score_session(case: EvaluationCase, session: dict[str, Any]) -> dict[str, An
         else 1.0
     )
     supported = bool(session.get("evidence")) and not forbidden_hits
+    activity = session.get("tool_activity")
+    if not isinstance(activity, dict):
+        activity = analyze_tool_activity(session)
+    targeted_read_performed = any(
+        row.get("tool_name") in TARGETED_READ_TOOLS
+        for row in activity.get("rows", [])
+        if isinstance(row, dict)
+    )
+    tool_protocol_compliant = session.get("error_type") != "model_tool_protocol"
+    secret_free = redact_data(session) == session
     return {
         "uuid": case.uuid,
         "root_cause_accurate": accuracy,
@@ -101,11 +115,17 @@ def score_session(case: EvaluationCase, session: dict[str, Any]) -> dict[str, An
         ),
         "forbidden_claims": forbidden_hits,
         "acknowledges_insufficient_evidence": acknowledges_insufficiency,
+        "tool_protocol_compliant": tool_protocol_compliant,
+        "targeted_read_performed": targeted_read_performed,
+        "verdict_source": str(session.get("verdict_source", "unknown")),
+        "secret_free": secret_free,
         "passed": (
             accuracy
             and supported
             and len(required_hits) == len(case.required_evidence)
             and not forbidden_hits
+            and tool_protocol_compliant
+            and secret_free
         ),
     }
 

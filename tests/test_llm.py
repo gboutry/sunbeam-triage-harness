@@ -9,7 +9,10 @@ from sunbeam_triage.core.llm import REPORT_SCHEMA, DiagnosisReport, OpenRouterCl
 from sunbeam_triage.core.llm_exchanges import ExchangeRecorder
 from sunbeam_triage.core.llm_schema import REPORT_SCHEMA as SCHEMA_REPORT_SCHEMA
 from sunbeam_triage.core.llm_schema import DiagnosisReport as SchemaDiagnosisReport
-from sunbeam_triage.core.llm_tool_loop import compact_investigation_messages
+from sunbeam_triage.core.llm_tool_loop import (
+    ModelToolProtocolError,
+    compact_investigation_messages,
+)
 from sunbeam_triage.core.llm_transport import OpenRouterTransport, cache_kwargs
 from sunbeam_triage.core.triage_state import InvestigationState, TriageLoopOptions
 
@@ -1100,7 +1103,7 @@ def test_openrouter_client_rejects_broad_search_only_confirmed_diagnosis(tmp_pat
         )
 
 
-def test_openrouter_client_preserves_speculative_diagnosis_when_required_tools_are_ignored(
+def test_openrouter_client_fails_when_required_tools_are_ignored(
     tmp_path,
 ):
     response = {
@@ -1131,16 +1134,19 @@ def test_openrouter_client_preserves_speculative_diagnosis_when_required_tools_a
         FakeSdkResponse(json.dumps(response)),
     ])
 
-    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
-        "evidence text",
-        artifact_root=tmp_path,
-    )
+    events = []
+    with pytest.raises(ModelToolProtocolError, match="tool_choice=required") as raised:
+        OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+            "evidence text",
+            artifact_root=tmp_path,
+            progress=events.append,
+        )
 
     assert len(sdk.chat.calls) == 2
-    assert report.confidence == "speculative"
-    assert report.needs_more_evidence is True
-    assert report.candidate_mechanisms[0].status == "speculative"
-    assert any("ignored required artifact tool use" in item for item in report.unknowns)
+    assert raised.value.code == "model_tool_protocol"
+    assert events[-1].phase == "model_protocol_error"
+    assert events[-1].status == "failed"
+    assert events[-1].warning == "model_tool_protocol"
 
 
 def test_openrouter_client_rejects_discovery_only_supported_diagnosis_without_evidence_tool(

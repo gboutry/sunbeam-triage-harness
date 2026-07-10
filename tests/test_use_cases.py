@@ -1,8 +1,11 @@
 import shutil
 from pathlib import Path
 
+from typing_extensions import override
+
 from sunbeam_triage.core.config import Config
 from sunbeam_triage.core.llm import DiagnosisReport
+from sunbeam_triage.core.llm_tool_loop import ModelToolProtocolError
 from sunbeam_triage.core.sessions import load_session_record, save_session_snapshot
 from sunbeam_triage.core.swift import MirrorManifest, SwiftObject
 from sunbeam_triage.core.use_cases import (
@@ -53,6 +56,13 @@ class FakeClient:
     def chat(self, context, messages, **kwargs):
         self.chat_calls.append({"context": context, "messages": messages, **kwargs})
         return self.answer
+
+
+class ProtocolFailingClient(FakeClient):
+    @override
+    def diagnose(self, evidence_text, **kwargs):
+        del evidence_text, kwargs
+        raise ModelToolProtocolError("model/a", "required", 1)
 
 
 def _config(tmp_path):
@@ -132,6 +142,31 @@ def test_run_diagnosis_preserves_attachments_on_error(tmp_path):
     loaded = load_session_record(config.paths.artifact_root, "sample-uuid")
     assert loaded is not None
     assert loaded["snapshot"]["status"] == "error"
+
+
+def test_run_diagnosis_persists_required_tool_protocol_failure(tmp_path):
+    _copy_fixture(tmp_path)
+    config = _config(tmp_path)
+    client = ProtocolFailingClient()
+    client.exchanges = [{"request": {}, "response": {"tool_calls": []}}]
+    use_cases = TriageUseCases(
+        config,
+        mirror_factory=lambda _swift, _artifact_root: FakeMirror(),
+        client_factory=lambda _llm: client,
+    )
+
+    result = use_cases.run_diagnosis(
+        DiagnosisRunRequest(uuid="sample-uuid", model="model/a"),
+        progress_events=[],
+    )
+
+    assert result.error == (
+        "Model model/a returned no tool call while tool_choice=required"
+    )
+    assert result.session["error_type"] == "model_tool_protocol"
+    assert result.session["investigation_status"] == "model_protocol_error"
+    assert result.session["verdict_source"] == "none"
+    assert "root_cause" not in result.session
 
 
 def test_send_followup_appends_chat_and_persists_session(tmp_path):

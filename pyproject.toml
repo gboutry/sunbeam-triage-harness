@@ -22,6 +22,7 @@ sunbeam-triage-analyze-rounds = "sunbeam_triage.cli.analyze_rounds:main"
 sunbeam-triage-arena = "sunbeam_triage.cli.arena:main"
 sunbeam-triage-eval = "sunbeam_triage.cli.evaluate:main"
 sunbeam-triage-replay = "sunbeam_triage.cli.replay:main"
+sunbeam-triage-scrub-sessions = "sunbeam_triage.cli.scrub_sessions:main"
 
 [dependency-groups]
 dev = [

@@ -10,7 +10,7 @@ from typing import Any
 
 from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
-from .llm import OpenRouterClient
+from .llm import ModelToolProtocolError, OpenRouterClient
 from .probes import ProbeResult
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_text
@@ -370,12 +370,25 @@ class ArenaRunner:
                 initial_evidence,
             )
         except Exception as exc:
+            exchanges = list(getattr(client, "exchanges", []))
             return {
                 **base,
                 "status": "failed",
                 "completed_at": _now(),
                 "error": str(exc),
-                "exchanges": list(getattr(client, "exchanges", [])),
+                "error_type": (
+                    exc.code
+                    if isinstance(exc, ModelToolProtocolError)
+                    else "provider_or_harness_error"
+                ),
+                "investigation_status": (
+                    "model_protocol_error"
+                    if isinstance(exc, ModelToolProtocolError)
+                    else "provider_error"
+                ),
+                "verdict_source": "none",
+                "exchanges": exchanges,
+                "tool_activity": analyze_tool_activity({"exchanges": exchanges}),
             }
         emit_progress(
             progress,
@@ -394,12 +407,24 @@ class ArenaRunner:
             "completed_at": _now(),
             "report": asdict(report),
             "exchanges": list(getattr(client, "exchanges", [])),
+            "investigation_status": "completed",
         }
         contender["tool_activity"] = analyze_tool_activity({
             "uuid": contender_session_id,
             "model": model,
             "exchanges": contender["exchanges"],
         })
+        deterministic = report.stop_reason.startswith("deterministic_")
+        contender["verdict_source"] = (
+            "hybrid"
+            if deterministic and contender["tool_activity"]["tool_call_count"]
+            else "deterministic_policy"
+            if deterministic
+            else "model"
+        )
+        contender["applied_policy_ids"] = (
+            [report.stop_reason] if deterministic else []
+        )
         contender["trace_path"] = f".sunbeam-triage/sessions/{session_id}.json"
         return contender
 

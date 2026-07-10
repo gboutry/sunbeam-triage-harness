@@ -18,11 +18,9 @@ from .llm_policy import (
     diagnosis_confidence_requires_artifact_evidence,
     diagnosis_needs_required_tool_retry,
     downgrade_tool_budget_diagnosis,
-    downgrade_unvalidated_diagnosis,
     exchange_range_has_evidence_tool_calls,
     exchange_range_has_targeted_read_tool_calls,
     exchange_range_has_tool_budget_fallback,
-    exchange_range_has_tool_calls,
 )
 from .llm_prompts import (
     chat_system_prompt,
@@ -37,7 +35,7 @@ from .llm_schema import (
     ReportEvidence,
     TimelineEvent,
 )
-from .llm_tool_loop import ArtifactToolLoop
+from .llm_tool_loop import ArtifactToolLoop, ModelToolProtocolError
 from .llm_transport import OpenRouterTransport, cache_kwargs
 from .progress import ProgressSink
 from .redaction import redact_text
@@ -49,6 +47,7 @@ __all__ = [
     "AlternativeConsidered",
     "CandidateMechanism",
     "DiagnosisReport",
+    "ModelToolProtocolError",
     "OpenRouterClient",
     "ReportEvidence",
     "TimelineEvent",
@@ -128,7 +127,6 @@ class OpenRouterClient:
                 contender_id=contender_id,
             )
         data = _response_json(response)
-        initial_data = data
         has_tool_budget_fallback = exchange_range_has_tool_budget_fallback(
             self.exchanges,
             exchange_start,
@@ -149,7 +147,6 @@ class OpenRouterClient:
                 response,
                 data=data,
             )
-            retry_start = len(self.exchanges)
             response = self._send_with_artifact_tools(
                 retry_request,
                 artifact_root=artifact_root,
@@ -169,14 +166,6 @@ class OpenRouterClient:
             ):
                 has_tool_budget_fallback = True
                 data = downgrade_tool_budget_diagnosis(data)
-            elif not exchange_range_has_tool_calls(self.exchanges, retry_start):
-                data = downgrade_unvalidated_diagnosis(
-                    initial_data,
-                    (
-                        "The model ignored required artifact tool use; this "
-                        "diagnosis is retained only as an unvalidated hypothesis."
-                    ),
-                )
         if (
             not has_tool_budget_fallback
             and artifact_root is not None
