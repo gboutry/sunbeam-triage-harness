@@ -5,3 +5,4 @@ sunbeam_triage.egg-info/
 artifacts/
 diagnostics-*.html
 .worktrees
+.env
