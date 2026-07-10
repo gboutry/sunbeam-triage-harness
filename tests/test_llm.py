@@ -242,6 +242,33 @@ def test_openrouter_client_includes_response_preview_for_non_object_json():
         OpenRouterClient(_config(), sdk_client=sdk).diagnose("evidence text")
 
 
+def test_openrouter_client_repairs_truncated_structured_response():
+    repaired = {
+        "summary": "The deploy step timed out.",
+        "failure_surface": "The readiness wait timed out.",
+        "confidence": "unknown",
+        "root_cause": "",
+        "needs_more_evidence": True,
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": ["The decisive log was not inspected."],
+    }
+    sdk = FakeSdkClient([
+        FakeSdkResponse('{"summary": "The deploy step timed out", "evidence": ['),
+        FakeSdkResponse(json.dumps(repaired)),
+    ])
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose("evidence text")
+
+    assert report.summary == "The deploy step timed out."
+    assert len(sdk.chat.calls) == 2
+    assert (
+        "previous structured response was truncated"
+        in sdk.chat.calls[1]["messages"][-1]["content"]
+    )
+
+
 def test_diagnosis_report_defaults_needs_more_evidence_for_old_payloads():
     report = DiagnosisReport.from_dict({
         "summary": "summary",
@@ -1073,7 +1100,7 @@ def test_openrouter_client_rejects_broad_search_only_confirmed_diagnosis(tmp_pat
         )
 
 
-def test_openrouter_client_rejects_supported_diagnosis_when_required_tools_are_ignored(
+def test_openrouter_client_preserves_speculative_diagnosis_when_required_tools_are_ignored(
     tmp_path,
 ):
     response = {
@@ -1104,13 +1131,16 @@ def test_openrouter_client_rejects_supported_diagnosis_when_required_tools_are_i
         FakeSdkResponse(json.dumps(response)),
     ])
 
-    with pytest.raises(RuntimeError, match="ignored required artifact tool use"):
-        OpenRouterClient(_config(), sdk_client=sdk).diagnose(
-            "evidence text",
-            artifact_root=tmp_path,
-        )
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=tmp_path,
+    )
 
     assert len(sdk.chat.calls) == 2
+    assert report.confidence == "speculative"
+    assert report.needs_more_evidence is True
+    assert report.candidate_mechanisms[0].status == "speculative"
+    assert any("ignored required artifact tool use" in item for item in report.unknowns)
 
 
 def test_openrouter_client_rejects_discovery_only_supported_diagnosis_without_evidence_tool(

@@ -15,6 +15,9 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
         "k8s_not_ready",
         "juju_lost_unit",
         "juju_migration",
+        "certificate_csr_churn",
+        "package_install_failure",
+        "relation_blockers",
         "workload_crash_recovery",
     ]
     assert results[0].status == "not_applicable"

@@ -135,6 +135,32 @@ def downgrade_tool_budget_diagnosis(data: dict[str, Any]) -> dict[str, Any]:
     return downgraded
 
 
+def downgrade_unvalidated_diagnosis(
+    data: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    downgraded = dict(data)
+    downgraded["confidence"] = "speculative"
+    downgraded["triage_confidence"] = "low"
+    downgraded["needs_more_evidence"] = True
+    unknowns = [
+        str(item) for item in downgraded.get("unknowns", []) if item is not None
+    ]
+    if reason not in unknowns:
+        unknowns.append(reason)
+    downgraded["unknowns"] = unknowns
+    mechanisms = []
+    for item in downgraded.get("candidate_mechanisms", []):
+        if not isinstance(item, dict):
+            continue
+        mechanism = dict(item)
+        if mechanism.get("status") in {"confirmed", "supported"}:
+            mechanism["status"] = "speculative"
+        mechanisms.append(mechanism)
+    downgraded["candidate_mechanisms"] = mechanisms
+    return downgraded
+
+
 def tool_calls_need_targeted_read_nudge(tool_calls: list[Any]) -> bool:
     names = {tool_call_name_and_arguments(call)[0] for call in tool_calls}
     broad_tools = DISCOVERY_TOOLS | {"search_artifacts"}

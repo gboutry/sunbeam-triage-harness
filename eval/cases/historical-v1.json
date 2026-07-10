@@ -3,20 +3,20 @@
     "uuid": "af305443-426a-42d9-8339-a72ec3af82c9",
     "phase": "sunbeam_deploy",
     "manifest_sha256": "78247cfb8b917dfba743d3c586705ffcc3207942e64ecd76eae1d72cf7b81c0c",
-    "accepted_root_causes": ["timeout|false.negative|completed after"],
+    "accepted_root_causes": ["false.negative|convergence completed after|premature.*timeout"],
     "required_evidence": ["output\\.log.*Node joined cluster"],
     "counterevidence": ["juju_status.*active|Node joined cluster"],
-    "forbidden_claims": ["CNI.*(?:definitive|root cause)"],
+    "forbidden_claims": ["(?:migration|CNI).*(?:caused|root cause|combined effect)"],
     "human_steering_required": false
   },
   {
     "uuid": "ab33d190-db4f-47cb-be37-bc04a17b8e73",
     "phase": "sunbeam_deploy",
     "manifest_sha256": "8d7ea339ae300472904c62ff20ceee51c829548330254c53cac4809a1039a296",
-    "accepted_root_causes": ["timeout|false.negative|completed after"],
+    "accepted_root_causes": ["false.negative|convergence completed after|premature.*timeout"],
     "required_evidence": ["output\\.log.*Node joined cluster"],
     "counterevidence": ["juju_status.*active|Node joined cluster"],
-    "forbidden_claims": ["CNI.*(?:definitive|root cause)"],
+    "forbidden_claims": ["(?:migration|CNI).*(?:caused|root cause|combined effect)"],
     "human_steering_required": false
   },
   {

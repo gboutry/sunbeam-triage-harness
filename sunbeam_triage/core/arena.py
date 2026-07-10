@@ -11,8 +11,10 @@ from typing import Any
 from .config import Config, LlmConfig
 from .evidence import EvidenceCollector
 from .llm import OpenRouterClient
+from .probes import ProbeResult
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_text
+from .report_policy import apply_probe_report_policies
 from .sessions import append_session_event, save_session_snapshot
 from .tool_activity import analyze_tool_activity
 from .triage_state import (
@@ -128,6 +130,8 @@ class ArenaRunner:
                 session_id=session_id,
                 artifact_root=artifact_root,
                 triage_options=triage_options,
+                probe_results=pack.probe_results,
+                initial_evidence=pack.evidence,
                 progress=progress,
             )
             session["contenders"].append(contender)
@@ -253,6 +257,8 @@ class ArenaRunner:
                 session_id=session_id,
                 artifact_root=artifact_root,
                 triage_options=triage_options,
+                probe_results=pack.probe_results,
+                initial_evidence=pack.evidence,
                 progress=progress,
             )
             updated["contenders"][index] = replacement
@@ -323,6 +329,8 @@ class ArenaRunner:
         session_id: str,
         artifact_root: Path,
         triage_options: TriageLoopOptions,
+        probe_results: tuple[ProbeResult, ...],
+        initial_evidence: tuple[Any, ...],
         progress: ProgressSink | None = None,
     ) -> dict[str, Any]:
         llm_config = _llm_config_for_model(self.config.llm, model)
@@ -355,6 +363,11 @@ class ArenaRunner:
                 progress=_arena_progress_proxy(progress),
                 run_type="arena",
                 contender_id=contender_id,
+            )
+            report = apply_probe_report_policies(
+                report,
+                probe_results,
+                initial_evidence,
             )
         except Exception as exc:
             return {

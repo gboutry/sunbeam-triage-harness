@@ -8,6 +8,7 @@ from ..core.config import Config
 from ..core.evidence import EvidenceCollector
 from ..core.llm import DiagnosisReport, OpenRouterClient
 from ..core.render import render_html
+from ..core.report_policy import apply_probe_report_policies
 from ..core.swift import SwiftMirror
 from ..core.triage_state import BudgetProfile, resolve_triage_budget
 
@@ -99,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             max_tool_result_chars=triage_options.max_tool_result_chars,
             triage_options=triage_options,
         )
+    report = apply_probe_report_policies(report, pack.probe_results, pack.evidence)
     _log("result", f"confidence={report.confidence} summary={report.summary}")
 
     output = config.output_path(uuid)

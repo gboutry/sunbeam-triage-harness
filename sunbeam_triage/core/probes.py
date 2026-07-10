@@ -45,6 +45,20 @@ FAILED_MIGRATION_SIGNAL = re.compile(
     r"invalid entity|invalid password|password invalid|agent\.conf.*unchanged|migration.*failed",
     re.IGNORECASE,
 )
+CSR_CHURN_SIGNAL = re.compile(
+    r"CSR for .* not found in relation data|regenerate certificates|SAN validation",
+    re.IGNORECASE,
+)
+PACKAGE_INSTALL_SIGNAL = re.compile(
+    r"ifaddresses\(\) method: bad call flags|maas-region-api|postinst|dpkg.*error",
+    re.IGNORECASE,
+)
+RELATION_BLOCKER_SIGNAL = re.compile(
+    r"cinder-volume.*\(amqp\) integration missing|"
+    r"cinder-volume-mysql-router.*(?:Missing relation: database|\(database\))|"
+    r"^(?:cinder|glance|nova)(?:/\d+\*?)?\s+.*Payload container not ready",
+    re.IGNORECASE,
+)
 K8S_UNIT_LIFECYCLE = re.compile(
     r"stopped \"k8s/0\"|start(?:ing)? .*unit-k8s-0|Starting unit workers for \"k8s/0\"",
     re.IGNORECASE,
@@ -105,7 +119,96 @@ def run_preflight_probes(root: Path, uuid: str) -> tuple[ProbeResult, ...]:
         _run_k8s_not_ready_probe(root),
         _run_juju_lost_unit_probe(root),
         _run_juju_migration_probe(root),
+        _run_certificate_csr_churn_probe(root),
+        _run_package_install_failure_probe(root),
+        _run_relation_blockers_probe(root),
         _run_workload_crash_recovery_probe(root),
+    )
+
+
+def _run_certificate_csr_churn_probe(root: Path) -> ProbeResult:
+    rel = "generated/sunbeam/juju_debug_log_openstack-machines.txt"
+    findings = _text_file_findings(root, rel, CSR_CHURN_SIGNAL, "csr_churn", limit=16)
+    if not findings:
+        return ProbeResult(
+            name="certificate_csr_churn",
+            status="not_applicable",
+            summary="No certificate CSR churn evidence was found.",
+        )
+    return ProbeResult(
+        name="certificate_csr_churn",
+        status="triggered",
+        summary="Certificate requests were missing from relation data and regenerated.",
+        findings=findings,
+    )
+
+
+def _run_package_install_failure_probe(root: Path) -> ProbeResult:
+    findings: list[ProbeFinding] = []
+    for rel in (
+        "generated/maas/log.txt",
+        "generated/foundation.log",
+        "generated/github-runner/run.log",
+    ):
+        findings.extend(
+            _text_file_findings(
+                root,
+                rel,
+                PACKAGE_INSTALL_SIGNAL,
+                "package_install_failure",
+                limit=12,
+            )
+        )
+    decisive = any("bad call flags" in item.excerpt for item in findings)
+    if not decisive:
+        return ProbeResult(
+            name="package_install_failure",
+            status="not_applicable",
+            summary="No decisive package-install failure signature was found.",
+        )
+    return ProbeResult(
+        name="package_install_failure",
+        status="triggered",
+        summary="MAAS package configuration failed in ifaddresses().",
+        findings=findings[:24],
+    )
+
+
+def _run_relation_blockers_probe(root: Path) -> ProbeResult:
+    findings: list[ProbeFinding] = []
+    for rel in (
+        "generated/sunbeam/juju_status_openstack.txt",
+        "generated/sunbeam/juju_status_openstack-machines.txt",
+    ):
+        findings.extend(
+            _text_file_findings(
+                root,
+                rel,
+                RELATION_BLOCKER_SIGNAL,
+                "relation_blocker",
+                limit=16,
+            )
+        )
+    text = "\n".join(finding.excerpt.lower() for finding in findings)
+    required = (
+        "(amqp) integration missing",
+        "cinder-volume-mysql-router",
+        "payload container not ready",
+    )
+    if not all(item.lower() in text for item in required):
+        return ProbeResult(
+            name="relation_blockers",
+            status="not_applicable",
+            summary="The complete relation-blocker signature was not found.",
+        )
+    return ProbeResult(
+        name="relation_blockers",
+        status="triggered",
+        summary="Multiple direct relation and payload readiness blockers were found.",
+        findings=findings[:24],
+        missing_evidence=[
+            "The status snapshot does not establish a common upstream cause for all blockers."
+        ],
     )
 
 
@@ -155,6 +258,7 @@ def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
         ),
         *completions[:12],
         *_later_convergence_findings(root),
+        *_terminal_blocker_findings(root),
     ]
     if completions:
         summary = (
@@ -174,6 +278,36 @@ def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
             else ["No successful remote completion after the timeout was recorded."]
         ),
     )
+
+
+def _terminal_blocker_findings(root: Path) -> list[ProbeFinding]:
+    rel = "generated/sunbeam/juju_status_openstack-machines.txt"
+    path = root / rel
+    if not path.exists():
+        return []
+    findings: list[ProbeFinding] = []
+    for number, line in enumerate(
+        path.read_text(encoding="utf-8", errors="replace").splitlines(),
+        start=1,
+    ):
+        stripped = line.strip()
+        if not re.search(r"^(k8s|openstack-hypervisor)(?:/\d+)?\s", stripped):
+            continue
+        if not re.search(
+            r"\b(blocked|error|waiting|maintenance|lost|unknown)\b",
+            stripped,
+            re.IGNORECASE,
+        ):
+            continue
+        findings.append(
+            ProbeFinding(
+                category="terminal_blocker",
+                path=rel,
+                line=number,
+                excerpt=_excerpt(stripped),
+            )
+        )
+    return findings[:12]
 
 
 def _run_k8s_not_ready_probe(root: Path) -> ProbeResult:

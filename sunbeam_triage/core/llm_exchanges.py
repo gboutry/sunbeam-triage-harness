@@ -63,6 +63,17 @@ def response_json(response: Any) -> dict[str, Any]:
     return data
 
 
+def response_is_probably_truncated_json(response: Any) -> bool:
+    content = response_content(response).strip()
+    if not content.startswith("{"):
+        return False
+    try:
+        json.loads(content)
+    except json.JSONDecodeError as exc:
+        return not content.endswith("}") or exc.pos >= max(len(content) - 32, 0)
+    return False
+
+
 def response_preview(content: str, max_chars: int = 4000) -> str:
     if len(content) <= max_chars:
         return content

@@ -14,6 +14,7 @@ from .llm import DiagnosisReport, OpenRouterClient
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_data, redact_text
 from .render import render_html
+from .report_policy import apply_probe_report_policies
 from .sessions import append_session_event, load_session_record, save_session_snapshot
 from .swift import SwiftConfig, SwiftMirror
 from .triage_state import (
@@ -185,6 +186,11 @@ class TriageUseCases:
                 max_tool_result_chars=triage_options.max_tool_result_chars,
                 triage_options=triage_options,
                 progress=progress,
+            )
+            report = apply_probe_report_policies(
+                report,
+                pack.probe_results,
+                pack.evidence,
             )
 
             output = run_config.output_path(uuid)

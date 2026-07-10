@@ -6,6 +6,7 @@ from typing import Any
 from .config import LlmConfig
 from .llm_exchanges import (
     ExchangeRecorder,
+    response_is_probably_truncated_json,
 )
 from .llm_exchanges import (
     response_content as _response_content,
@@ -17,6 +18,7 @@ from .llm_policy import (
     diagnosis_confidence_requires_artifact_evidence,
     diagnosis_needs_required_tool_retry,
     downgrade_tool_budget_diagnosis,
+    downgrade_unvalidated_diagnosis,
     exchange_range_has_evidence_tool_calls,
     exchange_range_has_targeted_read_tool_calls,
     exchange_range_has_tool_budget_fallback,
@@ -99,7 +101,34 @@ class OpenRouterClient:
             run_type=run_type,
             contender_id=contender_id,
         )
+        if response_is_probably_truncated_json(response):
+            repair_request = {
+                **request,
+                "messages": [
+                    *request["messages"],
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous structured response was truncated. "
+                            "Return the complete diagnosis again as concise valid "
+                            "JSON matching the required schema. Keep excerpts and "
+                            "rationales short. Do not use tools in this repair."
+                        ),
+                    },
+                ],
+            }
+            response = self._send_with_artifact_tools(
+                repair_request,
+                artifact_root=None,
+                max_tool_rounds=None,
+                max_tool_result_chars=max_tool_result_chars,
+                progress=progress,
+                run_id=session_id or self.config.model,
+                run_type=run_type,
+                contender_id=contender_id,
+            )
         data = _response_json(response)
+        initial_data = data
         has_tool_budget_fallback = exchange_range_has_tool_budget_fallback(
             self.exchanges,
             exchange_start,
@@ -141,9 +170,12 @@ class OpenRouterClient:
                 has_tool_budget_fallback = True
                 data = downgrade_tool_budget_diagnosis(data)
             elif not exchange_range_has_tool_calls(self.exchanges, retry_start):
-                raise RuntimeError(
-                    "Model ignored required artifact tool use; diagnosis was "
-                    "not validated."
+                data = downgrade_unvalidated_diagnosis(
+                    initial_data,
+                    (
+                        "The model ignored required artifact tool use; this "
+                        "diagnosis is retained only as an unvalidated hypothesis."
+                    ),
                 )
         if (
             not has_tool_budget_fallback
