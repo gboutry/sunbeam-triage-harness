@@ -4,7 +4,7 @@ from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.core.report_policy import apply_probe_report_policies
 
 
-def test_false_negative_policy_overrides_unsupported_delay_mechanism():
+def test_false_negative_policy_separates_outcome_from_delay_mechanism():
     report = DiagnosisReport(
         summary="Migration caused the timeout.",
         failure_surface="k8s readiness timed out.",
@@ -48,11 +48,12 @@ def test_false_negative_policy_overrides_unsupported_delay_mechanism():
 
     result = apply_probe_report_policies(report, probes)
 
-    assert "false-negative timeout" in result.root_cause
-    assert "does not establish" in result.root_cause
-    assert result.stop_reason == "deterministic_false_negative"
+    assert result.root_cause == "Juju migration caused delayed readiness."
+    assert result.causal_assessment is not None
+    assert "deadline expired" in result.causal_assessment.failure_trigger.claim
+    assert "after the deadline" in result.causal_assessment.post_failure_outcome.claim
+    assert result.causal_assessment.root_cause.claim == result.root_cause
     assert result.candidate_mechanisms[0].status == "supported"
-    assert result.candidate_mechanisms[1].status == "speculative"
     assert any(item.excerpt == "Node joined cluster" for item in result.evidence)
 
 
@@ -277,6 +278,8 @@ def test_relation_blocker_policy_reports_surface_without_common_cause():
 
     result = apply_probe_report_policies(report, (relations,))
 
-    assert "Evidence is insufficient" in result.root_cause
+    assert result.root_cause == "The common upstream cause is not established."
+    assert result.causal_assessment.root_cause.confidence == "unknown"
+    assert result.causal_assessment.contributing_factors
     assert result.needs_more_evidence is True
     assert result.stop_reason == "deterministic_relation_blockers"

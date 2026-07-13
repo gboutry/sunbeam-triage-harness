@@ -458,18 +458,60 @@ def _render_diagnosis_result(session: dict[str, Any]) -> None:
 
     with st.expander("Diagnosis details", expanded=False):
         _render_download_failures(session)
-        st.markdown("**Failure Surface**")
-        st.write(session.get("failure_surface", ""))
-        st.markdown("**Root Cause**")
-        st.write(session.get("root_cause", ""))
+        assessment = session.get("causal_assessment")
+        if isinstance(assessment, dict):
+            for label, value in _causal_rows(assessment):
+                st.markdown(f"**{label}**")
+                st.write(value or "None established.")
+        else:
+            st.markdown("**Failure Surface**")
+            st.write(session.get("failure_surface", ""))
+            st.markdown("**Root Cause**")
+            st.write(session.get("root_cause", ""))
 
 
 def _primary_finding(session: dict[str, Any]) -> str:
+    assessment = session.get("causal_assessment")
+    if isinstance(assessment, dict):
+        root = assessment.get("root_cause")
+        if isinstance(root, dict) and root.get("confidence") != "unknown":
+            claim = str(root.get("claim", "")).strip()
+            if claim:
+                return claim
+        trigger = assessment.get("failure_trigger")
+        if isinstance(trigger, dict):
+            claim = str(trigger.get("claim", "")).strip()
+            if claim:
+                return claim
     root_cause = str(session.get("root_cause", "")).strip()
     if root_cause:
         return root_cause
     summary = str(session.get("summary", "")).strip()
     return summary or "No diagnosis summary recorded."
+
+
+def _causal_rows(assessment: dict[str, Any]) -> list[tuple[str, str]]:
+    def claim(name: str) -> str:
+        value = assessment.get(name)
+        return str(value.get("claim", "")) if isinstance(value, dict) else ""
+
+    def claims(name: str) -> str:
+        values = assessment.get(name, [])
+        if not isinstance(values, list):
+            return ""
+        return "; ".join(
+            str(value.get("claim", ""))
+            for value in values
+            if isinstance(value, dict) and value.get("claim")
+        )
+
+    return [
+        ("Failure Trigger", claim("failure_trigger")),
+        ("Symptoms", claims("symptoms")),
+        ("Contributing Factors", claims("contributing_factors")),
+        ("Root Cause", claim("root_cause")),
+        ("Post-Failure Outcome", claim("post_failure_outcome")),
+    ]
 
 
 def _render_markdown_export_button(session: dict[str, Any]) -> None:

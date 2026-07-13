@@ -43,6 +43,7 @@ class ToolObservation:
     error: str = ""
     missing_evidence: tuple[str, ...] = ()
     confidence: str = "low"
+    counterevidence_check: bool = False
 
 
 @dataclass
@@ -60,6 +61,7 @@ class InvestigationState:
     stop_reason: str = ""
     targeted_evidence_count: int = 0
     failed_targeted_reads: list[str] = field(default_factory=list)
+    counterevidence_checks: int = 0
     stall_count: int = 0
     _seen_observations: set[str] = field(default_factory=set, init=False, repr=False)
     _seen_evidence: set[str] = field(default_factory=set, init=False, repr=False)
@@ -100,6 +102,9 @@ class InvestigationState:
                 if failed not in self.failed_targeted_reads:
                     self.failed_targeted_reads.append(failed)
 
+        if observation.counterevidence_check and observation.success:
+            self.counterevidence_checks += 1
+
         if observation.timestamp_count and made_progress:
             self.failure_timeline.append({
                 "timestamp": "observed",
@@ -122,7 +127,7 @@ class InvestigationState:
         if self.stop_reason:
             return True
         if self._has_sufficient_evidence():
-            self.stop_reason = "sufficient_evidence"
+            self.stop_reason = "cause_evidence_covered"
             self.phase = "finalisation"
             return True
         if self.stall_count >= self.options.stall_limit:
@@ -147,6 +152,7 @@ class InvestigationState:
                 "alternatives_considered": self.alternatives_considered[-12:],
                 "targeted_evidence_count": self.targeted_evidence_count,
                 "failed_targeted_reads": self.failed_targeted_reads[-8:],
+                "counterevidence_checks": self.counterevidence_checks,
                 "stall_count": self.stall_count,
                 "confidence": self.confidence,
                 "next_action": self.next_action,
@@ -155,11 +161,11 @@ class InvestigationState:
         )
 
     def _has_sufficient_evidence(self) -> bool:
-        if len(self.evidence_found) < self.options.min_evidence_items:
+        if len(self.evidence_found) < max(self.options.min_evidence_items, 3):
             return False
-        if self.targeted_evidence_count < 1:
+        if self.targeted_evidence_count < 2:
             return False
-        return bool(self.alternatives_considered or self.missing_evidence)
+        return self.counterevidence_checks >= 1
 
 
 def resolve_triage_budget(
@@ -218,6 +224,23 @@ def observe_tool_result(
         error=str(result.get("error", "")),
         missing_evidence=tuple(_missing_evidence(tool_name, arguments, result)),
         confidence=_confidence_for_tool_result(tool_name, arguments, result),
+        counterevidence_check=_is_counterevidence_check(arguments),
+    )
+
+
+def _is_counterevidence_check(arguments: dict[str, Any]) -> bool:
+    text = json.dumps(arguments, sort_keys=True).lower()
+    return any(
+        marker in text
+        for marker in (
+            "active|ready",
+            "ready|active",
+            "completed",
+            "recovery",
+            "recovered",
+            "success",
+            "counter",
+        )
     )
 
 

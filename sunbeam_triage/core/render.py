@@ -22,8 +22,7 @@ def render_html(pack: EvidencePack, report: DiagnosisReport) -> str:
         "<body>",
         f"<h1>Diagnostics: {_safe(pack.uuid)}</h1>",
         _summary(pack, report),
-        _section("Failure Surface", f"<p>{_safe(report.failure_surface)}</p>"),
-        _section("Root Cause", f"<p>{_safe(report.root_cause)}</p>"),
+        _causal_assessment(report),
         _report_evidence(report),
         _failure_timeline(report),
         _cascading_errors(report),
@@ -80,6 +79,32 @@ def _report_evidence(report: DiagnosisReport) -> str:
         body += "\n".join(rows)
         body += "</tbody></table>"
     return _section("Evidence Used By Diagnosis", body)
+
+
+def _causal_assessment(report: DiagnosisReport) -> str:
+    assessment = report.causal_assessment
+    if assessment is None:
+        return _section("Root Cause", f"<p>{_safe(report.root_cause)}</p>")
+    rows = [
+        ("Failure trigger", assessment.failure_trigger.claim),
+        ("Symptoms", _claim_list(assessment.symptoms)),
+        ("Contributing factors", _claim_list(assessment.contributing_factors)),
+        ("Root cause", assessment.root_cause.claim),
+        ("Post-failure outcome", assessment.post_failure_outcome.claim),
+    ]
+    body = (
+        "<dl>"
+        + "".join(
+            f"<dt>{_safe(label)}</dt><dd>{_safe(value or 'None established.')}</dd>"
+            for label, value in rows
+        )
+        + "</dl>"
+    )
+    return _section("Causal Assessment", body)
+
+
+def _claim_list(claims) -> str:
+    return "; ".join(claim.claim for claim in claims if claim.claim)
 
 
 def _candidate_mechanisms(report: DiagnosisReport) -> str:

@@ -41,20 +41,20 @@ def test_resolve_juju_unit_maps_subordinate_to_host_sosreport(tmp_path):
         "sunbeam-machine/3 active idle 3 10.241.4.23\n"
         "  ubuntu-pro/10 error idle 10.241.4.23 hook failed: config-changed\n"
     )
-    (generated / "juju_machines_openstack-machines.json").write_text(json.dumps({
-        "machines": {
-            "3": {
-                "hostname": "surskit",
-                "ip-addresses": ["10.241.4.23"],
+    (generated / "juju_machines_openstack-machines.json").write_text(
+        json.dumps({
+            "machines": {
+                "3": {
+                    "hostname": "surskit",
+                    "ip-addresses": ["10.241.4.23"],
+                }
             }
-        }
-    }))
+        })
+    )
     archive_path = generated / "sosreport-surskit-2026-07-08-test.tar.xz"
     with tarfile.open(archive_path, "w:xz") as archive:
         content = b"apt-get update failed\n"
-        info = tarfile.TarInfo(
-            "sosreport-surskit/var/log/juju/unit-ubuntu-pro-10.log"
-        )
+        info = tarfile.TarInfo("sosreport-surskit/var/log/juju/unit-ubuntu-pro-10.log")
         info.size = len(content)
         archive.addfile(info, io.BytesIO(content))
 
@@ -64,10 +64,12 @@ def test_resolve_juju_unit_maps_subordinate_to_host_sosreport(tmp_path):
     assert result["principal"] == "sunbeam-machine/3"
     assert result["machine_id"] == "3"
     assert result["hostname"] == "surskit"
-    assert result["suggested_members"] == [{
-        "archive_path": "generated/sunbeam/sosreport-surskit-2026-07-08-test.tar.xz",
-        "member_path": "var/log/juju/unit-ubuntu-pro-10.log",
-    }]
+    assert result["suggested_members"] == [
+        {
+            "archive_path": "generated/sunbeam/sosreport-surskit-2026-07-08-test.tar.xz",
+            "member_path": "var/log/juju/unit-ubuntu-pro-10.log",
+        }
+    ]
 
 
 def test_list_artifact_files_returns_sorted_relative_paths_and_sizes(tmp_path):
@@ -271,11 +273,13 @@ def test_search_artifacts_returns_bounded_matches_and_skips_archives(tmp_path):
                 "path": "generated/sunbeam/other.log",
                 "line": 1,
                 "excerpt": "ERROR other",
+                "evidence_id": result["matches"][0]["evidence_id"],
             },
             {
                 "path": "generated/sunbeam/output.log",
                 "line": 2,
                 "excerpt": "ERROR first",
+                "evidence_id": result["matches"][1]["evidence_id"],
             },
         ],
         "truncated": True,
@@ -420,6 +424,7 @@ def test_search_sosreport_returns_bounded_line_matches(tmp_path):
                 "path": "var/log/syslog",
                 "line": 2,
                 "excerpt": "ERROR first failure",
+                "evidence_id": result["matches"][0]["evidence_id"],
             }
         ],
         "truncated": True,
@@ -563,9 +568,16 @@ def test_search_sosreport_skips_binary_members(tmp_path):
         },
     )
 
-    assert result["matches"] == [
-        {"path": "var/log/syslog", "line": 1, "excerpt": "needle"}
-    ]
+    assert result["matches"][0]["evidence_id"].startswith("ev-")
+    assert {
+        key: value
+        for key, value in result["matches"][0].items()
+        if key != "evidence_id"
+    } == {
+        "path": "var/log/syslog",
+        "line": 1,
+        "excerpt": "needle",
+    }
 
 
 def test_generic_archive_tools_search_and_read_non_sosreport_tgz(tmp_path):
@@ -619,6 +631,7 @@ def test_generic_archive_tools_search_and_read_non_sosreport_tgz(tmp_path):
             "path": "generated/sunbeam/logs-openstack-neutron-0.txt",
             "line": 2,
             "excerpt": "ERROR Cannot find Logical_Router_Port",
+            "evidence_id": search["matches"][0]["evidence_id"],
         }
     ]
     assert read["content"] == "ERROR Cannot find Logical_Router_Port"

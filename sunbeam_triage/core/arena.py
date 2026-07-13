@@ -15,6 +15,7 @@ from .probes import ProbeResult
 from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_text
 from .report_policy import apply_probe_report_policies
+from .report_validation import validate_causal_report
 from .sessions import append_session_event, save_session_snapshot
 from .tool_activity import analyze_tool_activity
 from .triage_state import (
@@ -369,6 +370,7 @@ class ArenaRunner:
                 probe_results,
                 initial_evidence,
             )
+            report = validate_causal_report(report, probe_results)
         except Exception as exc:
             exchanges = list(getattr(client, "exchanges", []))
             return {
@@ -422,9 +424,7 @@ class ArenaRunner:
             if deterministic
             else "model"
         )
-        contender["applied_policy_ids"] = (
-            [report.stop_reason] if deterministic else []
-        )
+        contender["applied_policy_ids"] = [report.stop_reason] if deterministic else []
         contender["trace_path"] = f".sunbeam-triage/sessions/{session_id}.json"
         return contender
 

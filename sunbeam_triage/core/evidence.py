@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .evidence_model import EvidenceObservation
+from .evidence_model import EvidenceObservation, evidence_id
 from .probes import ProbeResult, run_preflight_probes
 from .redaction import redact_text
 from .step_profiles import profile_for_step
@@ -71,6 +71,10 @@ class EvidenceItem:
     line: int | None
     excerpt: str
 
+    @property
+    def id(self) -> str:
+        return evidence_id(self.path, self.line, self.excerpt)
+
 
 @dataclass(frozen=True)
 class EvidencePack:
@@ -98,7 +102,7 @@ class EvidencePack:
         ]
         for item in self.evidence:
             line = "" if item.line is None else f":{item.line}"
-            parts.append(f"- [{item.kind}] {item.path}{line}: {item.excerpt}")
+            parts.append(f"- [{item.id}/{item.kind}] {item.path}{line}: {item.excerpt}")
         if self.step_selection is not None:
             parts.extend([
                 "",
@@ -373,7 +377,8 @@ def _probe_prompt_lines(probe_results: tuple[ProbeResult, ...]) -> list[str]:
         for finding in result.findings[:20]:
             line = "" if finding.line is None else f":{finding.line}"
             lines.append(
-                f"  - [{finding.category}] {finding.path}{line}: {finding.excerpt}"
+                f"  - [{finding.id}/{finding.category}] "
+                f"{finding.path}{line}: {finding.excerpt}"
             )
         lines.extend(f"  - [missing] {missing}" for missing in result.missing_evidence)
     return lines

@@ -15,6 +15,7 @@ from .llm import OpenRouterClient
 from .progress import ProgressSink
 from .render import render_html
 from .report_policy import apply_probe_report_policies
+from .report_validation import validate_causal_report
 from .tool_activity import analyze_tool_activity
 from .triage_state import BudgetName, BudgetProfile, resolve_triage_budget
 from .use_cases import session_from_diagnosis
@@ -76,6 +77,7 @@ def replay_case(
     except Exception as exc:
         raise ReplayAttemptError(str(exc), list(client.exchanges)) from exc
     report = apply_probe_report_policies(report, pack.probe_results, pack.evidence)
+    report = validate_causal_report(report, pack.probe_results)
     html_path.write_text(render_html(pack, report), encoding="utf-8")
     session = session_from_diagnosis(
         uuid=case.uuid,

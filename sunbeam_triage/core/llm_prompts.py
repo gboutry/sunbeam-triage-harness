@@ -42,7 +42,14 @@ def diagnosis_system_prompt() -> str:
         "hypotheses; gather supporting and contradicting evidence; then decide "
         "whether the evidence is sufficient. Treat later healthy state and "
         "successful remote completion as counter-evidence to a timeout root-cause "
-        "claim. Every supported or confirmed conclusion must cite an inspected "
+        "claim. Fill causal_assessment by separating the CI failure trigger, "
+        "observed symptoms, contributing factors, the underlying root cause, and "
+        "the post-failure outcome. Eventual convergence belongs only in "
+        "post_failure_outcome. A timeout or not-ready status is a trigger or "
+        "symptom, not a root cause. Set root_cause confidence to unknown when no "
+        "pre-failure mechanism is established. Every non-unknown causal claim "
+        "must reference evidence IDs from the provided evidence ledger or tool "
+        "results. Every supported or confirmed conclusion must cite an inspected "
         "raw artifact path. Reporting insufficient evidence is a valid result."
     )
 

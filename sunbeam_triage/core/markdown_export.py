@@ -38,6 +38,25 @@ def _metadata_lines(session: dict[str, Any]) -> list[str]:
 
 
 def _diagnosis_lines(session: dict[str, Any]) -> list[str]:
+    assessment = session.get("causal_assessment")
+    if isinstance(assessment, dict):
+        fields = [
+            ("Summary", session.get("summary")),
+            ("Failure trigger", _claim(assessment.get("failure_trigger"))),
+            ("Symptoms", _claims(assessment.get("symptoms"))),
+            (
+                "Contributing factors",
+                _claims(assessment.get("contributing_factors")),
+            ),
+            ("Root cause", _claim(assessment.get("root_cause"))),
+            (
+                "Post-failure outcome",
+                _claim(assessment.get("post_failure_outcome")),
+            ),
+        ]
+        return [
+            f"**{label}:** {_text(value)}" for label, value in fields if _text(value)
+        ]
     fields = [
         ("Summary", session.get("summary")),
         ("Failure surface", session.get("failure_surface")),
@@ -45,6 +64,14 @@ def _diagnosis_lines(session: dict[str, Any]) -> list[str]:
     ]
     lines = [f"**{label}:** {_text(value)}" for label, value in fields if _text(value)]
     return lines or ["No diagnosis summary recorded."]
+
+
+def _claim(value: Any) -> str:
+    return _text(value.get("claim")) if isinstance(value, dict) else ""
+
+
+def _claims(value: Any) -> str:
+    return "; ".join(_claim(item) for item in _items(value) if _claim(item))
 
 
 def _evidence_section(session: dict[str, Any]) -> list[str]:

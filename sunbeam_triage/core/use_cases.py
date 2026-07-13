@@ -15,6 +15,7 @@ from .progress import ProgressEvent, ProgressSink, emit_progress
 from .redaction import redact_data, redact_text
 from .render import render_html
 from .report_policy import apply_probe_report_policies
+from .report_validation import validate_causal_report
 from .sessions import append_session_event, load_session_record, save_session_snapshot
 from .swift import SwiftConfig, SwiftMirror
 from .tool_activity import analyze_tool_activity
@@ -156,9 +157,7 @@ class TriageUseCases:
                             f"{event['status']} {event['index']}/{event['total']}: "
                             f"{event['name']}"
                         ),
-                        warning=(
-                            str(event["error"]) if event.get("error") else None
-                        ),
+                        warning=(str(event["error"]) if event.get("error") else None),
                     )
 
                 manifest = self.mirror_factory(
@@ -223,6 +222,7 @@ class TriageUseCases:
                 pack.probe_results,
                 pack.evidence,
             )
+            report = validate_causal_report(report, pack.probe_results)
 
             output = run_config.output_path(uuid)
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -496,6 +496,11 @@ def session_from_diagnosis(
         ],
         "missing_evidence": report.missing_evidence,
         "stop_reason": report.stop_reason,
+        "causal_assessment": (
+            asdict(report.causal_assessment)
+            if report.causal_assessment is not None
+            else None
+        ),
         "investigation_status": "completed",
         "verdict_source": verdict_source,
         "applied_policy_ids": [report.stop_reason] if deterministic else [],
@@ -514,7 +519,7 @@ def session_from_diagnosis(
 def persist_diagnosis_session(artifact_root: Path, session: dict[str, Any]) -> None:
     snapshot = {
         **session,
-        "schema_version": 2,
+        "schema_version": 3,
         "session_id": str(session["uuid"]),
         "session_type": "diagnosis",
         "status": "error" if session.get("error") else "completed",
@@ -539,6 +544,7 @@ def report_from_session(session: dict[str, Any]) -> DiagnosisReport:
         "alternatives_considered": session.get("alternatives_considered", []),
         "missing_evidence": session.get("missing_evidence", []),
         "stop_reason": session.get("stop_reason", ""),
+        "causal_assessment": session.get("causal_assessment"),
     })
 
 
@@ -561,6 +567,7 @@ def build_followup_context(
         f"Triage Confidence: {report.triage_confidence}",
         f"Stop Reason: {report.stop_reason}",
         f"Root Cause: {report.root_cause}",
+        f"Causal Assessment: {asdict(report.causal_assessment)}",
         "",
         "Model Evidence:",
     ]

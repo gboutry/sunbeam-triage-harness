@@ -1,0 +1,46 @@
+[
+  {
+    "uuid": "0db979a1-3153-4cbb-8747-b4ab482e4e93",
+    "contributor": "MetalLB validation webhooks refused connections"
+  },
+  {
+    "uuid": "50e0c284-40cf-4ef5-9e9d-952d18ab01a5",
+    "contributor": ""
+  },
+  {
+    "uuid": "a7bdae2d-92e9-495d-a7a7-470a9aca32a2",
+    "contributor": "CNI configuration was not initialized"
+  },
+  {
+    "uuid": "1427a48f-f8ec-4616-a9a4-68c1f0a195bf",
+    "contributor": "CNI was not initialized and CoreDNS readiness probes failed"
+  },
+  {
+    "uuid": "77899b72-ec62-4f67-9bd3-01de41b1d22a",
+    "contributor": "MetalLB validation webhooks refused connections"
+  },
+  {
+    "uuid": "b256bc62-a74f-4941-aa96-381881638478",
+    "contributor": "Rawfile CSI and the MetalLB speaker were unready"
+  },
+  {
+    "uuid": "4ff60d14-b875-4511-a946-6a806b19ecde",
+    "contributor": "Kubernetes features and MetalLB were not ready"
+  },
+  {
+    "uuid": "79f77b92-ff5a-4304-b923-64da2e2cf0a5",
+    "contributor": "CNI configuration was not initialized on hoodin"
+  },
+  {
+    "uuid": "c1040771-aefd-49cc-9de2-454ac166ea55",
+    "contributor": "MetalLB webhook and CNI readiness failures were observed"
+  },
+  {
+    "uuid": "a3c3c748-4afd-44d7-82ee-3a13a5d55c08",
+    "contributor": "MetalLB webhooks refused connections during cluster-token initialization"
+  },
+  {
+    "uuid": "12fecdb5-0938-4f51-8b55-28aa90fdc3f8",
+    "contributor": "k8sd returned HTTP 503 because the daemon was not ready"
+  }
+]

@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from .redaction import redact_text
 
 Confidence = str
 ReadClass = str
+
+
+def evidence_id(
+    path: str,
+    line: int | None,
+    excerpt: str,
+    *,
+    member_path: str = "",
+) -> str:
+    """
+    Build an identifier for one observation.
+
+    Returns:
+        A stable, content-addressed evidence identifier.
+
+    """
+    material = "\x1f".join((path, member_path, str(line or ""), excerpt.strip()))
+    return f"ev-{hashlib.sha256(material.encode()).hexdigest()[:16]}"
 
 
 def confidence_for_read(read_class: ReadClass) -> Confidence:

@@ -616,7 +616,7 @@ def test_save_arena_verdict_persists_judged_snapshot_without_promoting_winner(tm
     assert app._load_diagnosis_session(artifact_root, "sample-uuid") is None
 
 
-def test_persist_diagnosis_session_writes_only_v2_snapshot(tmp_path):
+def test_persist_diagnosis_session_writes_only_v3_snapshot(tmp_path):
     artifact_root = tmp_path / "artifacts"
     session = {
         "uuid": "sample-uuid",
@@ -632,7 +632,7 @@ def test_persist_diagnosis_session_writes_only_v2_snapshot(tmp_path):
     assert not (artifact_root / ".sunbeam-triage-ui").exists()
     loaded = load_session_record(artifact_root, "sample-uuid")
     assert loaded is not None
-    assert loaded["snapshot"]["schema_version"] == 2
+    assert loaded["snapshot"]["schema_version"] == 3
     assert loaded["snapshot"]["session_type"] == "diagnosis"
     assert loaded["snapshot"]["summary"] == "Diagnosis summary"
 

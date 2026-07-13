@@ -3,9 +3,12 @@ from __future__ import annotations
 import copy
 import json
 import re
+from dataclasses import replace
 from typing import Any
 
 from .llm_exchanges import tool_call_name_and_arguments
+from .llm_schema import CausalClaim, DiagnosisReport
+from .probes import ProbeResult
 from .triage_state import ToolObservation, _extract_entities, observe_tool_result
 
 
@@ -67,6 +70,134 @@ def validate_diagnosis_report(
         _record_failed_targeted_reads(validated, observations)
 
     return validated
+
+
+def validate_causal_report(
+    report: DiagnosisReport,
+    probe_results: tuple[ProbeResult, ...] | list[ProbeResult] = (),
+) -> DiagnosisReport:
+    """
+    Enforce claim-level provenance after deterministic policy amendments.
+
+    Returns:
+        The report with unsupported causal confidence downgraded.
+
+    """
+    assessment = report.causal_assessment
+    if assessment is None:
+        return report
+    evidence_by_id = {item.id: item for item in report.evidence}
+    trusted_roles = {
+        finding.id: _role_for_probe_category(finding.category)
+        for probe in probe_results
+        for finding in probe.findings
+    }
+
+    failure_trigger = _validate_claim(assessment.failure_trigger, evidence_by_id)
+    symptoms = [_validate_claim(item, evidence_by_id) for item in assessment.symptoms]
+    factors = [
+        _validate_claim(item, evidence_by_id)
+        for item in assessment.contributing_factors
+    ]
+    outcome = _validate_claim(assessment.post_failure_outcome, evidence_by_id)
+    root = _validate_claim(assessment.root_cause, evidence_by_id)
+    root_roles = {
+        trusted_roles.get(item, evidence_by_id[item].role)
+        for item in root.evidence_ids
+        if item in evidence_by_id
+    }
+    noncausal_roles = {
+        "failure_trigger",
+        "symptom",
+        "counterevidence",
+        "post_failure_outcome",
+        "observation",
+    }
+    if root.confidence in {"confirmed", "supported"} and (
+        not root.evidence_ids or root_roles <= noncausal_roles
+    ):
+        root = CausalClaim(
+            claim="The underlying cause is not established by the available evidence.",
+            confidence="unknown",
+            counterevidence_ids=list(root.counterevidence_ids),
+            missing_evidence=[
+                *root.missing_evidence,
+                (
+                    "Root-cause evidence must identify a pre-failure causal mechanism; "
+                    "trigger, symptom, and recovery evidence are insufficient."
+                ),
+            ],
+        )
+
+    validated = replace(
+        assessment,
+        failure_trigger=failure_trigger,
+        symptoms=symptoms,
+        contributing_factors=factors,
+        root_cause=root,
+        post_failure_outcome=outcome,
+    )
+    cause_unknown = root.confidence == "unknown"
+    missing = list(report.missing_evidence)
+    for item in root.missing_evidence:
+        if item not in missing:
+            missing.append(item)
+    return replace(
+        report,
+        root_cause=root.claim,
+        confidence=("unknown" if cause_unknown else report.confidence),
+        triage_confidence=("low" if cause_unknown else report.triage_confidence),
+        needs_more_evidence=report.needs_more_evidence or cause_unknown,
+        missing_evidence=missing,
+        stop_reason=("cause_unresolved" if cause_unknown else report.stop_reason),
+        causal_assessment=validated,
+    )
+
+
+def _role_for_probe_category(category: str) -> str:
+    if category == "timeout_surface":
+        return "failure_trigger"
+    if category in {"post_timeout_completion", "later_convergence"}:
+        return "post_failure_outcome"
+    if category in {"failed_migration_signal", "package_install_failure"}:
+        return "root_cause"
+    if category in {
+        "relation_blocker",
+        "csr_churn",
+        "workload_crash",
+        "recovery_counterevidence",
+    }:
+        return "contributing_factor"
+    return "symptom"
+
+
+def _validate_claim(
+    claim: CausalClaim,
+    evidence_by_id: dict[str, Any],
+) -> CausalClaim:
+    if claim.confidence == "unknown":
+        return claim
+    unresolved = [
+        item
+        for item in [*claim.evidence_ids, *claim.counterevidence_ids]
+        if item not in evidence_by_id
+    ]
+    if claim.evidence_ids and not unresolved:
+        return claim
+    missing = list(claim.missing_evidence)
+    detail = (
+        "Claim references evidence IDs absent from the validated ledger: "
+        + ", ".join(unresolved[:4])
+        if unresolved
+        else "Claim has no supporting evidence IDs in the validated ledger."
+    )
+    if detail not in missing:
+        missing.append(detail)
+    return replace(
+        claim,
+        confidence=("speculative" if claim.confidence != "unknown" else "unknown"),
+        missing_evidence=missing,
+    )
 
 
 def _reject_placeholder_fields(data: dict[str, Any]) -> None:

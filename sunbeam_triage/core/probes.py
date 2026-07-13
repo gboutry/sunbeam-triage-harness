@@ -5,6 +5,7 @@ import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .evidence_model import evidence_id
 from .juju_unit_tools import find_juju_error_units
 from .redaction import redact_text
 
@@ -85,8 +86,13 @@ class ProbeFinding:
     line: int | None
     excerpt: str
 
+    @property
+    def id(self) -> str:
+        return evidence_id(self.path, self.line, self.excerpt)
+
     def to_dict(self) -> dict[str, object]:
         return {
+            "id": self.id,
             "category": self.category,
             "path": self.path,
             "line": self.line,
@@ -139,24 +145,28 @@ def _run_juju_error_unit_probe(root: Path) -> ProbeResult:
     findings: list[ProbeFinding] = []
     missing: list[str] = []
     for unit in units[:12]:
-        findings.append(ProbeFinding(
-            category="unit_failure",
-            path=str(unit["status_path"]),
-            line=unit.get("status_line"),
-            excerpt=str(unit["status_excerpt"]),
-        ))
+        findings.append(
+            ProbeFinding(
+                category="unit_failure",
+                path=str(unit["status_path"]),
+                line=unit.get("status_line"),
+                excerpt=str(unit["status_excerpt"]),
+            )
+        )
         suggested = list(unit.get("suggested_members", []))
         if suggested:
             target = suggested[0]
-            findings.append(ProbeFinding(
-                category="unit_log_target",
-                path=f"{target['archive_path']}::{target['member_path']}",
-                line=None,
-                excerpt=(
-                    f"{unit['unit']} maps to machine {unit['machine_id']} on "
-                    f"{unit['hostname']}; inspect this unit log before assigning cause."
-                ),
-            ))
+            findings.append(
+                ProbeFinding(
+                    category="unit_log_target",
+                    path=f"{target['archive_path']}::{target['member_path']}",
+                    line=None,
+                    excerpt=(
+                        f"{unit['unit']} maps to machine {unit['machine_id']} on "
+                        f"{unit['hostname']}; inspect this unit log before assigning cause."
+                    ),
+                )
+            )
         else:
             missing.append(
                 f"No unit log target was found for {unit['unit']} on "

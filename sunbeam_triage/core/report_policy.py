@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from .evidence import EvidenceItem
-from .llm_schema import CandidateMechanism, DiagnosisReport, ReportEvidence
+from .llm_schema import (
+    CandidateMechanism,
+    CausalAssessment,
+    CausalClaim,
+    DiagnosisReport,
+    ReportEvidence,
+)
 from .probes import ProbeResult
 
 
@@ -80,7 +86,35 @@ def apply_probe_report_policies(
             ),
             stop_reason="deterministic_relation_blockers",
         )
-        return replace(result, needs_more_evidence=True)
+        relation_ids = [finding.id for finding in relations.findings]
+        assessment = replace(
+            result.causal_assessment,
+            contributing_factors=[
+                CausalClaim(
+                    claim=(
+                        "Relation and payload readiness blockers were present "
+                        "before the timeout."
+                    ),
+                    confidence="confirmed",
+                    evidence_ids=relation_ids,
+                )
+            ],
+            root_cause=CausalClaim(
+                claim="The common upstream cause is not established.",
+                confidence="unknown",
+                missing_evidence=[
+                    "Evidence connecting the observed blockers to one upstream cause."
+                ],
+            ),
+        )
+        return replace(
+            result,
+            root_cause="The common upstream cause is not established.",
+            confidence="unknown",
+            triage_confidence="low",
+            needs_more_evidence=True,
+            causal_assessment=assessment,
+        )
     if timeout is None or not _is_k8s_false_negative(timeout, k8s):
         return _attach_failure_surface_evidence(report, initial_evidence)
 
@@ -89,6 +123,8 @@ def apply_probe_report_policies(
             path=finding.path,
             line=finding.line,
             excerpt=finding.excerpt,
+            id=finding.id,
+            role=_role_for_timeout_finding(finding.category),
         )
         for finding in timeout.findings
         if finding.category
@@ -102,48 +138,55 @@ def apply_probe_report_policies(
     unknowns = [*report.unknowns]
     if unknown not in unknowns:
         unknowns.append(unknown)
-    mechanisms = [
-        CandidateMechanism(
-            name=item.name,
-            status=(
-                "speculative"
-                if item.status in {"confirmed", "supported"}
-                else item.status
-            ),
-            rationale=item.rationale,
-        )
-        for item in report.candidate_mechanisms
+    trigger_ids = [
+        finding.id
+        for finding in timeout.findings
+        if finding.category == "timeout_surface"
     ]
-    mechanisms.insert(
-        0,
-        CandidateMechanism(
-            name="false-negative k8s readiness timeout",
-            status="supported",
-            rationale=(
-                "The output records node joins after the timeout and final "
-                "cluster evidence shows convergence."
+    outcome_ids = [
+        finding.id
+        for finding in timeout.findings
+        if finding.category in {"post_timeout_completion", "later_convergence"}
+    ]
+    assessment = report.causal_assessment or CausalAssessment(
+        failure_trigger=CausalClaim(claim="", confidence="unknown")
+    )
+    assessment = replace(
+        assessment,
+        failure_trigger=CausalClaim(
+            claim="The CI readiness deadline expired before convergence.",
+            confidence="confirmed",
+            evidence_ids=trigger_ids,
+        ),
+        post_failure_outcome=CausalClaim(
+            claim=(
+                "Cluster operations completed after the deadline and the final "
+                "snapshot shows convergence."
             ),
+            confidence="confirmed",
+            evidence_ids=outcome_ids,
         ),
     )
+    cause_unknown = assessment.root_cause.confidence == "unknown"
     return replace(
         report,
         summary=(
             "The CI step reported a k8s readiness timeout, but subsequent "
-            "artifact evidence shows the nodes joined and the cluster converged."
+            "artifact evidence shows later convergence; the reason for the delay "
+            "must be assessed separately."
         ),
-        root_cause=(
-            "The CI failure was a false-negative timeout: convergence completed "
-            "after the readiness deadline. The evidence does not establish the "
-            "underlying reason for the delay."
-        ),
-        confidence="supported",
-        needs_more_evidence=False,
+        needs_more_evidence=report.needs_more_evidence or cause_unknown,
         evidence=evidence,
-        candidate_mechanisms=mechanisms,
         unknowns=unknowns,
-        triage_confidence="medium",
-        stop_reason="deterministic_false_negative",
+        stop_reason=("cause_unresolved" if cause_unknown else report.stop_reason),
+        causal_assessment=assessment,
     )
+
+
+def _role_for_timeout_finding(category: str) -> str:
+    if category == "timeout_surface":
+        return "failure_trigger"
+    return "post_failure_outcome"
 
 
 def _probe(
@@ -231,6 +274,8 @@ def _deterministic_report(
                 path=finding.path,
                 line=finding.line,
                 excerpt=finding.excerpt,
+                id=finding.id,
+                role="root_cause",
             )
             for finding in probe.findings
         ],
@@ -239,6 +284,8 @@ def _deterministic_report(
                 path=finding.path,
                 line=finding.line,
                 excerpt=finding.excerpt,
+                id=finding.id,
+                role="counterevidence",
             )
             for additional in additional_probes
             for finding in additional.findings
@@ -264,6 +311,33 @@ def _deterministic_report(
             for item in report.candidate_mechanisms
         ],
     ]
+    assessment = CausalAssessment(
+        failure_trigger=(
+            report.causal_assessment.failure_trigger
+            if report.causal_assessment is not None
+            else CausalClaim(report.failure_surface, report.confidence)
+        ),
+        symptoms=(
+            list(report.causal_assessment.symptoms)
+            if report.causal_assessment is not None
+            else []
+        ),
+        contributing_factors=(
+            list(report.causal_assessment.contributing_factors)
+            if report.causal_assessment is not None
+            else []
+        ),
+        root_cause=CausalClaim(
+            claim=root_cause,
+            confidence="supported",
+            evidence_ids=[item.id for item in evidence if item.role == "root_cause"],
+        ),
+        post_failure_outcome=(
+            report.causal_assessment.post_failure_outcome
+            if report.causal_assessment is not None
+            else CausalClaim("", "unknown")
+        ),
+    )
     return replace(
         report,
         summary=summary,
@@ -274,6 +348,7 @@ def _deterministic_report(
         candidate_mechanisms=mechanisms,
         triage_confidence="medium",
         stop_reason=stop_reason,
+        causal_assessment=assessment,
     )
 
 
@@ -284,7 +359,13 @@ def _attach_failure_surface_evidence(
     if report.evidence or not report.needs_more_evidence:
         return report
     evidence = [
-        ReportEvidence(path=item.path, line=item.line, excerpt=item.excerpt)
+        ReportEvidence(
+            path=item.path,
+            line=item.line,
+            excerpt=item.excerpt,
+            id=item.id,
+            role="failure_trigger",
+        )
         for item in initial_evidence[:12]
     ]
     if not evidence:

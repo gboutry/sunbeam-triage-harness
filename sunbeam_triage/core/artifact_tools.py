@@ -6,6 +6,7 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
+from .evidence_model import evidence_id
 from .juju_unit_tools import resolve_juju_unit
 from .redaction import redact_text
 from .sosreport_tools import (
@@ -357,28 +358,51 @@ def execute_artifact_tool(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     if name == "resolve_juju_unit":
-        return resolve_juju_unit(root, arguments)
+        return _with_evidence_ids(resolve_juju_unit(root, arguments))
     if name == "list_artifact_files":
         return _list_artifact_files(root)
     if name == "get_artifact_file":
-        return _get_artifact_file(root, arguments)
+        return _with_evidence_ids(_get_artifact_file(root, arguments))
     if name == "search_artifacts":
-        return _search_artifacts(root, arguments)
+        return _with_evidence_ids(_search_artifacts(root, arguments))
     if name == "list_archive_files":
         return list_archive_files(root, arguments)
     if name == "search_archive":
-        return search_archive(root, arguments)
+        return _with_evidence_ids(search_archive(root, arguments))
     if name == "get_archive_file":
-        return get_archive_file(root, arguments)
+        return _with_evidence_ids(get_archive_file(root, arguments))
     if name == "list_sosreports":
         return list_sosreports(root)
     if name == "list_sosreport_files":
         return list_sosreport_files(root, arguments)
     if name == "search_sosreport":
-        return search_sosreport(root, arguments)
+        return _with_evidence_ids(search_sosreport(root, arguments))
     if name == "get_sosreport_file":
-        return get_sosreport_file(root, arguments)
+        return _with_evidence_ids(get_sosreport_file(root, arguments))
     return {"ok": False, "error": f"Unknown artifact tool: {name}"}
+
+
+def _with_evidence_ids(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("ok") is not True:
+        return result
+    enriched = dict(result)
+    archive = str(enriched.get("archive_path", ""))
+    matches = enriched.get("matches")
+    if isinstance(matches, list):
+        enriched["matches"] = [
+            {
+                **item,
+                "evidence_id": evidence_id(
+                    archive or str(item.get("path", "")),
+                    item.get("line"),
+                    str(item.get("excerpt", "")),
+                    member_path=(str(item.get("path", "")) if archive else ""),
+                ),
+            }
+            for item in matches
+            if isinstance(item, dict)
+        ]
+    return enriched
 
 
 def _list_artifact_files(root: Path) -> dict[str, Any]:

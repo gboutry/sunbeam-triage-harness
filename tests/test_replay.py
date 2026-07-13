@@ -3,7 +3,12 @@ import shutil
 
 from sunbeam_triage.core.config import Config
 from sunbeam_triage.core.evaluation import EvaluationCase
-from sunbeam_triage.core.llm import DiagnosisReport, ReportEvidence
+from sunbeam_triage.core.llm import (
+    CausalAssessment,
+    CausalClaim,
+    DiagnosisReport,
+    ReportEvidence,
+)
 from sunbeam_triage.core.replay import ReplayAttemptError, replay_case
 
 
@@ -12,18 +17,36 @@ class FakeReplayClient:
         self.exchanges = []
 
     def diagnose(self, _evidence, **_kwargs):
+        trigger = ReportEvidence(
+            path="generated/sunbeam/output.log",
+            line=2,
+            excerpt="wait timed out",
+            role="failure_trigger",
+        )
+        cause = ReportEvidence(
+            path="generated/sunbeam/output.log",
+            line=1,
+            excerpt="CNI configuration missing before readiness check",
+            role="root_cause",
+        )
         return DiagnosisReport(
             summary="The operation timed out.",
             failure_surface="The deployment step timed out.",
             confidence="supported",
-            root_cause="Readiness did not converge before timeout.",
-            evidence=[
-                ReportEvidence(
-                    path="generated/sunbeam/output.log",
-                    line=2,
-                    excerpt="wait timed out",
-                )
-            ],
+            root_cause="CNI configuration was missing.",
+            evidence=[trigger, cause],
+            causal_assessment=CausalAssessment(
+                failure_trigger=CausalClaim(
+                    "The deployment step timed out.",
+                    "confirmed",
+                    evidence_ids=[trigger.id],
+                ),
+                root_cause=CausalClaim(
+                    "CNI configuration was missing.",
+                    "supported",
+                    evidence_ids=[cause.id],
+                ),
+            ),
         )
 
 
@@ -47,7 +70,7 @@ def test_replay_case_persists_isolated_attempt(tmp_path):
         uuid="sample-uuid",
         phase="sunbeam_deploy",
         manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
-        accepted_root_causes=("readiness.*timeout",),
+        accepted_root_causes=("CNI configuration.*missing",),
         required_evidence=("output\\.log.*wait timed out",),
     )
     output_dir = tmp_path / "replay"

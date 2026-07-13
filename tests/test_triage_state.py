@@ -74,14 +74,37 @@ def test_investigation_state_stops_after_sufficient_independent_evidence():
             }),
         )
     )
-    state.alternatives_considered.append({
-        "hypothesis": "Database outage",
-        "status": "less_likely",
-        "reason": "No DB errors near the first failure timestamp.",
-    })
+    state.apply_observation(
+        observe_tool_result(
+            "get_artifact_file",
+            {"path": "nova-api.log", "line_start": 1238, "line_count": 12},
+            json.dumps({
+                "ok": True,
+                "path": "nova-api.log",
+                "line_start": 1238,
+                "content": "10:42:31 oslo.messaging timeout\n",
+            }),
+        )
+    )
+    state.apply_observation(
+        observe_tool_result(
+            "search_artifacts",
+            {"pattern": "active|ready", "path_glob": "*status*"},
+            json.dumps({
+                "ok": True,
+                "matches": [
+                    {
+                        "path": "status.txt",
+                        "line": 4,
+                        "excerpt": "database active ready",
+                    }
+                ],
+            }),
+        )
+    )
 
     assert state.should_finalize() is True
-    assert state.stop_reason == "sufficient_evidence"
+    assert state.stop_reason == "cause_evidence_covered"
 
 
 def test_investigation_state_requires_targeted_evidence_for_sufficiency():
@@ -149,7 +172,7 @@ def test_investigation_state_stops_on_budget_exhaustion_with_partial_summary():
     assert "budget_exhausted" in state.to_prompt_summary()
 
 
-def test_empty_targeted_search_records_missing_evidence_and_allows_finalization():
+def test_missing_evidence_does_not_allow_causal_finalization():
     options = TriageLoopOptions(max_rounds=12, hard_max_rounds=20)
     state = InvestigationState(options=options)
 
@@ -193,8 +216,8 @@ def test_empty_targeted_search_records_missing_evidence_and_allows_finalization(
         )
     )
 
-    assert state.should_finalize() is True
-    assert state.stop_reason == "sufficient_evidence"
+    assert state.should_finalize() is False
+    assert state.stop_reason == ""
     assert state.missing_evidence
     assert "invalid entity|password" in state.missing_evidence[0]
 
