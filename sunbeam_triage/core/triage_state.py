@@ -278,12 +278,17 @@ def _evidence_keys(
         excerpt = _first_signal_line(str(result.get("content", "")))
         if excerpt:
             keys.append(_pack_evidence(path, line, excerpt))
-    if not keys and tool_name in {
-        "get_artifact_file",
-        "search_artifacts",
-        "search_sosreport",
-        "get_sosreport_file",
-    }:
+    if (
+        not keys
+        and not result
+        and tool_name
+        in {
+            "get_artifact_file",
+            "search_artifacts",
+            "search_sosreport",
+            "get_sosreport_file",
+        }
+    ):
         path = str(arguments.get("path") or arguments.get("archive_path") or tool_name)
         excerpt = _first_signal_line(content)
         if excerpt:

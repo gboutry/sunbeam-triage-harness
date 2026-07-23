@@ -9,6 +9,7 @@ from .artifact_tools import artifact_tool_definitions, execute_artifact_tool
 from .llm_exchanges import (
     assistant_tool_message,
     coerce_float,
+    response_content,
     tool_call_dict,
     tool_call_id,
     tool_call_name_and_arguments,
@@ -19,6 +20,7 @@ from .llm_policy import tool_calls_need_targeted_read_nudge
 from .llm_prompts import (
     finalization_message,
     investigation_state_message,
+    premature_finalization_nudge_message,
     targeted_read_nudge_message,
 )
 from .progress import (
@@ -65,7 +67,7 @@ class ArtifactToolLoop:
         self.send = send
         self.record_exchange = record_exchange
 
-    def run(
+    def run(  # noqa: PLR0915
         self,
         request: dict[str, Any],
         *,
@@ -123,15 +125,24 @@ class ArtifactToolLoop:
             self.record_exchange(request, response)
             calls = tool_calls(response)
             if not calls:
-                if tool_choice == "required" and not required_tool_observed:
-                    _raise_required_tool_error(
-                        request=request,
-                        progress=progress,
-                        run_id=run_id,
-                        run_type=run_type,
-                        contender_id=contender_id,
-                        round_number=round_number,
-                    )
+                _ensure_required_tool_call(
+                    request=request,
+                    required_tool_observed=required_tool_observed,
+                    progress=progress,
+                    run_id=run_id,
+                    run_type=run_type,
+                    contender_id=contender_id,
+                    round_number=round_number,
+                )
+                if _continue_after_premature_final(
+                    request,
+                    response,
+                    state,
+                    run_type,
+                    required_tool_observed=required_tool_observed,
+                ):
+                    required_tool_observed = False
+                    continue
                 emit_completed(
                     progress,
                     response,
@@ -263,6 +274,52 @@ class ArtifactToolLoop:
             contender_id=contender_id,
         )
         return response
+
+
+def _ensure_required_tool_call(
+    *,
+    request: dict[str, Any],
+    required_tool_observed: bool,
+    progress: ProgressSink | None,
+    run_id: str,
+    run_type: str,
+    contender_id: str | None,
+    round_number: int,
+) -> None:
+    if request.get("tool_choice") != "required" or required_tool_observed:
+        return
+    _raise_required_tool_error(
+        request=request,
+        progress=progress,
+        run_id=run_id,
+        run_type=run_type,
+        contender_id=contender_id,
+        round_number=round_number,
+    )
+
+
+def _continue_after_premature_final(
+    request: dict[str, Any],
+    response: Any,
+    state: InvestigationState,
+    run_type: str,
+    *,
+    required_tool_observed: bool,
+) -> bool:
+    if (
+        not required_tool_observed
+        or run_type == "followup"
+        or len(state.evidence_found) < state.options.min_evidence_items
+        or state.should_finalize()
+    ):
+        return False
+    request["messages"] = [
+        *request["messages"],
+        {"role": "assistant", "content": response_content(response)},
+        premature_finalization_nudge_message(state),
+    ]
+    request["tool_choice"] = "required"
+    return True
 
 
 def _raise_required_tool_error(

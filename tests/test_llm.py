@@ -518,6 +518,95 @@ def test_openrouter_client_executes_artifact_tool_calls_for_diagnosis(tmp_path):
     assert "first meaningful error" not in system_prompt
 
 
+def test_diagnosis_rejects_premature_final_after_artifact_exploration(tmp_path):
+    artifact_root = tmp_path / "uuid"
+    output = artifact_root / "generated/sunbeam/output.log"
+    remote = artifact_root / "generated/sunbeam/remote.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("12:05:06 machine add timed out\n", encoding="utf-8")
+    remote.write_text(
+        "12:05:05 apt-get update still running\n"
+        "12:07:00 machine add completed on control node\n",
+        encoding="utf-8",
+    )
+    premature = {
+        "summary": "The machine add timed out.",
+        "failure_surface": "cluster create failed",
+        "confidence": "unknown",
+        "root_cause": "",
+        "needs_more_evidence": True,
+        "evidence": [],
+        "candidate_mechanisms": [],
+        "recommendations": [],
+        "unknowns": ["Remote bootstrap evidence was not inspected."],
+    }
+    final = {
+        **premature,
+        "summary": "APT delayed the machine bootstrap.",
+        "confidence": "supported",
+        "root_cause": "APT was still running when machine add timed out.",
+        "needs_more_evidence": False,
+        "evidence": [
+            {
+                "path": "generated/sunbeam/remote.log",
+                "line": 1,
+                "excerpt": "12:05:05 apt-get update still running",
+            }
+        ],
+        "unknowns": [],
+    }
+    sdk = FakeSdkClient([
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-1",
+                    "get_artifact_file",
+                    json.dumps({
+                        "path": "generated/sunbeam/output.log",
+                        "line_start": 1,
+                    }),
+                ),
+                FakeToolCall(
+                    "call-2",
+                    "get_artifact_file",
+                    json.dumps({
+                        "path": "generated/sunbeam/remote.log",
+                        "line_start": 1,
+                        "line_count": 1,
+                    }),
+                ),
+            ],
+        ),
+        FakeSdkResponse(json.dumps(premature)),
+        FakeSdkResponse(
+            "",
+            tool_calls=[
+                FakeToolCall(
+                    "call-3",
+                    "search_artifacts",
+                    json.dumps({"pattern": "completed|success"}),
+                )
+            ],
+        ),
+        FakeSdkResponse(json.dumps(final)),
+    ])
+
+    report = OpenRouterClient(_config(), sdk_client=sdk).diagnose(
+        "evidence text",
+        artifact_root=artifact_root,
+    )
+
+    assert report.root_cause == "APT was still running when machine add timed out."
+    assert len(sdk.chat.calls) == 4
+    assert sdk.chat.calls[2]["tool_choice"] == "required"
+    assert (
+        "proposed final response is premature"
+        in sdk.chat.calls[2]["messages"][-1]["content"]
+    )
+    assert sdk.chat.calls[-1]["tool_choice"] == "none"
+
+
 def test_openrouter_client_validates_report_against_tool_provenance(tmp_path):
     artifact_root = tmp_path / "uuid"
     output = artifact_root / "generated/sunbeam/output.log"

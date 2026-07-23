@@ -286,6 +286,24 @@ def test_search_artifacts_returns_bounded_matches_and_skips_archives(tmp_path):
     }
 
 
+def test_search_artifacts_matches_exact_basename_glob_in_nested_path(tmp_path):
+    root = tmp_path / "uuid"
+    log = root / "generated/sunbeam/host03/cloud-init-output.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("Running apt-get update\n", encoding="utf-8")
+
+    result = execute_artifact_tool(
+        root,
+        "search_artifacts",
+        {"pattern": "apt-get", "path_glob": "cloud-init-output.log"},
+    )
+
+    assert result["ok"] is True
+    assert [match["path"] for match in result["matches"]] == [
+        "generated/sunbeam/host03/cloud-init-output.log"
+    ]
+
+
 def test_search_artifacts_bounds_long_line_excerpts(tmp_path):
     root = tmp_path / "uuid"
     path = root / "generated/sunbeam/output.log"

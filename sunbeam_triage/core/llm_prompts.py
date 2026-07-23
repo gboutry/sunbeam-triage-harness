@@ -124,6 +124,20 @@ def targeted_read_nudge_message() -> dict[str, str]:
     }
 
 
+def premature_finalization_nudge_message(state: InvestigationState) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": (
+            "The proposed final response is premature: the harness has not yet "
+            "covered the likely cause and a counter-evidence check. Continue the "
+            "same investigation with one targeted artifact tool call. Prioritize "
+            "evidence tied to the failed operation or entity over unrelated final "
+            "status symptoms. Current state: "
+            f"{state.to_prompt_summary()}"
+        ),
+    }
+
+
 def investigation_state_message(state: InvestigationState) -> dict[str, str]:
     return {
         "role": "user",

@@ -116,7 +116,10 @@ def artifact_tool_definitions() -> list[dict[str, Any]]:
                         },
                         "path_glob": {
                             "type": "string",
-                            "description": "Optional glob matched against relative paths.",
+                            "description": (
+                                "Optional glob matched against relative paths; a "
+                                "glob without '/' also matches file basenames."
+                            ),
                         },
                         "limit": {
                             "type": "integer",
@@ -498,8 +501,14 @@ def _search_artifacts(root: Path, arguments: dict[str, Any]) -> dict[str, Any]:
         rel_posix = relative.as_posix()
         if path_prefix and not rel_posix.startswith(path_prefix):
             continue
-        if path_glob and not fnmatch.fnmatch(rel_posix, path_glob):
-            continue
+        if path_glob:
+            matches_path = fnmatch.fnmatch(rel_posix, path_glob)
+            matches_basename = "/" not in path_glob and fnmatch.fnmatch(
+                relative.name,
+                path_glob,
+            )
+            if not matches_path and not matches_basename:
+                continue
         path = root / relative
         with path.open("rb") as stream:
             if b"\x00" in stream.read(4096):

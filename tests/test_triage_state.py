@@ -276,3 +276,21 @@ def test_tool_observation_confidence_separates_broad_and_targeted_reads():
 
     assert tool_observation_confidence(broad) == "low"
     assert tool_observation_confidence(targeted) == "high"
+
+
+def test_empty_search_is_countercheck_without_positive_evidence():
+    observation = observe_tool_result(
+        "search_artifacts",
+        {"pattern": "completed|success"},
+        json.dumps({"ok": True, "matches": []}),
+    )
+    state = InvestigationState(
+        options=TriageLoopOptions(max_rounds=12, hard_max_rounds=20)
+    )
+
+    state.apply_observation(observation)
+
+    assert observation.evidence_keys == ()
+    assert state.evidence_found == []
+    assert state.counterevidence_checks == 1
+    assert state.missing_evidence
