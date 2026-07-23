@@ -4,6 +4,99 @@ from sunbeam_triage.core.probes import ProbeFinding, ProbeResult
 from sunbeam_triage.core.report_policy import apply_probe_report_policies
 
 
+def test_machine_add_policy_confirms_apt_delay_but_not_proxy_root_cause():
+    report = DiagnosisReport(
+        summary="A Juju unit was lost.",
+        failure_surface="cluster create failed",
+        confidence="supported",
+        root_cause="The orchestrator unit was lost.",
+        candidate_mechanisms=[
+            CandidateMechanism(
+                name="lost orchestrator unit",
+                status="supported",
+                rationale="The final status contained a lost unit.",
+            )
+        ],
+    )
+    probe = ProbeResult(
+        name="machine_add_timeout",
+        status="triggered",
+        summary="APT crossed the machine-add deadline.",
+        findings=[
+            ProbeFinding(
+                "machine_add_timeout",
+                "generated/sunbeam/output.log",
+                10,
+                "host03 timed out after 306s.",
+            ),
+            ProbeFinding(
+                "remote_add_machine_failed",
+                "sosreport-host03:join.log",
+                20,
+                "host03: Add machine failed.",
+            ),
+            ProbeFinding(
+                "apt_process_running",
+                "sosreport-host03:ps_auxfwww",
+                4,
+                "host03: apt-get update was still running.",
+            ),
+            ProbeFinding(
+                "apt_proxy_path",
+                "sosreport-host03:90curtin-aptproxy",
+                1,
+                "host03: Acquire::http::Proxy http://10.239.8.11:8000.",
+            ),
+            ProbeFinding(
+                "successful_join_control",
+                "sosreport-host05:join.log",
+                20,
+                "Successful-node control: host05 completed Add machine.",
+            ),
+        ],
+    )
+
+    result = apply_probe_report_policies(report, (probe,))
+
+    assert result.confidence == "confirmed"
+    assert result.stop_reason == "deterministic_machine_add_apt_delay"
+    assert "slow or stalled APT" in result.root_cause
+    assert result.candidate_mechanisms[0].status == "confirmed"
+    assert result.candidate_mechanisms[1].status == "speculative"
+    assert result.causal_assessment is not None
+    assert result.causal_assessment.root_cause.evidence_ids
+    assert "proxy" in result.unknowns[-1]
+    assert "upstream repositories" in result.unknowns[-1]
+
+
+def test_machine_add_policy_requires_apt_to_cross_the_deadline():
+    report = DiagnosisReport(
+        summary="machine add failed",
+        failure_surface="cluster create failed",
+        confidence="unknown",
+        root_cause="",
+    )
+    probe = ProbeResult(
+        name="machine_add_timeout",
+        status="triggered",
+        summary="machine add timeout",
+        findings=[
+            ProbeFinding("machine_add_timeout", "output.log", 10, "timed out"),
+            ProbeFinding(
+                "remote_add_machine_failed", "join.log", 20, "Add machine failed"
+            ),
+            ProbeFinding(
+                "apt_proxy_path",
+                "apt.conf",
+                1,
+                "Acquire::http::Proxy http://10.239.8.11:8000",
+            ),
+        ],
+    )
+
+    assert apply_probe_report_policies(report, (probe,)) is report
+
+
 def test_false_negative_policy_separates_outcome_from_delay_mechanism():
     report = DiagnosisReport(
         summary="Migration caused the timeout.",

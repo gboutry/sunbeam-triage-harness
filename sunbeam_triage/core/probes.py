@@ -65,6 +65,22 @@ K8S_UNIT_LIFECYCLE = re.compile(
     r"stopped \"k8s/0\"|start(?:ing)? .*unit-k8s-0|Starting unit workers for \"k8s/0\"",
     re.IGNORECASE,
 )
+MACHINE_ADD_TIMEOUT = re.compile(
+    r"Timeout adding machine\s+(?P<address>\S+)\s+to Juju|"
+    r"TIMED OUT to add machine",
+    re.IGNORECASE,
+)
+MACHINE_ADD_RESULT = re.compile(
+    r"Finished running step 'Add machine'.*ResultType\.(?P<result>COMPLETED|FAILED)",
+    re.IGNORECASE,
+)
+APT_FETCH_DURATION = re.compile(
+    r"Fetched\s+.+?\s+in\s+(?:(?P<minutes>\d+)min\s+)?(?P<seconds>\d+)s",
+    re.IGNORECASE,
+)
+APT_BOOTSTRAP_STAGE = re.compile(r"Running apt-get (?:update|upgrade)", re.IGNORECASE)
+JUJU_AGENT_START = re.compile(r"Starting Juju machine agent", re.IGNORECASE)
+APT_PROCESS = re.compile(r"\bapt-get\b.*\b(update|upgrade|install)\b", re.IGNORECASE)
 K8SD_CRASH = re.compile(r"apport.*signal|k8sd|/snap/k8s/.*/bin/k8s", re.IGNORECASE)
 K8SD_RECOVERY = re.compile(
     r"snap\.k8s\.k8sd\.service.*active.*running|k8s\.k8sd\[\d+\].*checking service arguments",
@@ -123,6 +139,7 @@ def run_preflight_probes(root: Path, uuid: str) -> tuple[ProbeResult, ...]:
     root = Path(root)
     return (
         _run_timeout_outcome_probe(root),
+        _run_machine_add_timeout_probe(root),
         _run_k8s_not_ready_probe(root),
         _run_juju_lost_unit_probe(root),
         _run_juju_migration_probe(root),
@@ -280,7 +297,11 @@ def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
     timeout_lines = [
         number
         for number, line in enumerate(lines, start=1)
-        if re.search(r"wait timed out|TimeoutError", line, re.IGNORECASE)
+        if re.search(
+            r"wait timed out|TimeoutError|TIMED OUT to add machine",
+            line,
+            re.IGNORECASE,
+        )
     ]
     if not timeout_lines:
         return ProbeResult(
@@ -315,7 +336,14 @@ def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
         *_later_convergence_findings(root),
         *_terminal_blocker_findings(root),
     ]
-    if completions:
+    machine_add_timeout = any(MACHINE_ADD_TIMEOUT.search(line) for line in lines)
+    if completions and machine_add_timeout:
+        summary = (
+            "Machine-add timeouts and a later join completion coexist; correlate "
+            "remote outcomes per node rather than treating the run as a blanket "
+            "false negative."
+        )
+    elif completions:
         summary = (
             "The recorded timeout has post-timeout completion counter-evidence; "
             "evaluate it as a possible false negative."
@@ -332,6 +360,346 @@ def _run_timeout_outcome_probe(root: Path) -> ProbeResult:
             if completions
             else ["No successful remote completion after the timeout was recorded."]
         ),
+    )
+
+
+def _run_machine_add_timeout_probe(root: Path) -> ProbeResult:
+    rel = "generated/sunbeam/output.log"
+    path = root / rel
+    if not path.exists():
+        return ProbeResult(
+            name="machine_add_timeout",
+            status="not_applicable",
+            summary="No Sunbeam output log was available.",
+        )
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    timeout_findings: list[ProbeFinding] = []
+    failed_hosts: set[str] = set()
+    for line_number, line in enumerate(lines, start=1):
+        match = re.search(
+            r"Timeout adding machine\s+(?P<address>\S+)\s+to Juju",
+            line,
+            re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        host = _host_from_nearby_join_command(lines, line_number)
+        if host:
+            failed_hosts.add(host)
+        duration = _nearby_join_duration(lines, line_number, host)
+        duration_text = f" after {duration}s" if duration is not None else ""
+        target = host or "an unidentified join target"
+        timeout_findings.append(
+            ProbeFinding(
+                category="machine_add_timeout",
+                path=rel,
+                line=line_number,
+                excerpt=(
+                    f"{target} timed out adding machine {match.group('address')}"
+                    f"{duration_text}."
+                ),
+            )
+        )
+    if not timeout_findings:
+        return ProbeResult(
+            name="machine_add_timeout",
+            status="not_applicable",
+            summary="No Juju machine-add timeout was found.",
+        )
+
+    archive_findings: list[ProbeFinding] = []
+    control_findings: list[ProbeFinding] = []
+    missing: list[str] = []
+    archive_paths = [
+        archive
+        for archive in sorted(root.rglob("sosreport-*.tar*"))
+        if archive.is_file() and not archive.name.endswith(".sha256")
+    ]
+    archives_by_host = {
+        _host_from_archive_name(archive.name): archive
+        for archive in archive_paths
+        if _host_from_archive_name(archive.name)
+    }
+    for host in sorted(failed_hosts):
+        archive_path = archives_by_host.get(host)
+        if archive_path is None:
+            missing.append(
+                f"Remote-side evidence unavailable for {host}; mechanism not established."
+            )
+            continue
+        findings, _outcome = _machine_add_archive_findings(archive_path, root)
+        archive_findings.extend(findings)
+
+    for host, archive_path in archives_by_host.items():
+        if host in failed_hosts:
+            continue
+        findings, outcome = _machine_add_archive_findings(archive_path, root)
+        if outcome == "COMPLETED":
+            control_findings = [
+                _as_control_finding(finding)
+                for finding in findings
+                if finding.category
+                in {
+                    "remote_add_machine_completed",
+                    "apt_fetch_timing",
+                    "apt_proxy_path",
+                }
+            ][:4]
+            break
+
+    priority = {
+        "apt_process_running": 0,
+        "apt_update_incomplete": 1,
+        "apt_deadline_exceeded": 2,
+        "apt_fetch_timing": 3,
+        "remote_add_machine_failed": 4,
+        "agent_started": 5,
+        "apt_proxy_path": 6,
+    }
+    archive_findings.sort(key=lambda finding: priority.get(finding.category, 20))
+    findings = [*timeout_findings, *archive_findings, *control_findings]
+    causal = any(
+        finding.category in {"apt_process_running", "apt_deadline_exceeded"}
+        for finding in archive_findings
+    )
+    summary = (
+        "Juju machine-add deadlines expired while matching node bootstrap "
+        "evidence shows APT still running or exceeding the deadline."
+        if causal
+        else "Juju machine-add deadlines expired; matching bootstrap evidence was collected."
+    )
+    if not causal:
+        missing.append(
+            "No matching node proved that APT itself crossed the machine-add deadline."
+        )
+    return ProbeResult(
+        name="machine_add_timeout",
+        status="triggered",
+        summary=summary,
+        findings=findings[:40],
+        missing_evidence=missing,
+    )
+
+
+def _nearby_join_duration(
+    lines: list[str],
+    timeout_line: int,
+    host: str,
+) -> int | None:
+    timeout_time = _nearest_line_time(lines, timeout_line)
+    if timeout_time is None or not host:
+        return None
+    for number in range(timeout_line - 1, max(0, timeout_line - 80), -1):
+        line = lines[number - 1]
+        match = JOIN_COMMAND_HOST.search(line)
+        if match is None or match.group("host") != host or "Calling" not in line:
+            continue
+        start_time = _line_time_seconds(line)
+        if start_time is None:
+            return None
+        return (timeout_time - start_time) % (24 * 60 * 60)
+    return None
+
+
+def _nearest_line_time(lines: list[str], line_number: int) -> int | None:
+    for number in range(line_number, max(0, line_number - 6), -1):
+        result = _line_time_seconds(lines[number - 1])
+        if result is not None:
+            return result
+    return None
+
+
+def _machine_add_archive_findings(
+    archive_path: Path,
+    root: Path,
+) -> tuple[list[ProbeFinding], str]:
+    archive_rel = archive_path.relative_to(root).as_posix()
+    host = _host_from_archive_name(archive_path.name)
+    findings: list[ProbeFinding] = []
+    outcome = ""
+    try:
+        with tarfile.open(archive_path, "r:*") as archive:
+            for member in archive.getmembers():
+                normalized = _normalized_member_path(member.name)
+                if not member.isfile() or not normalized:
+                    continue
+                is_cli_log = normalized.startswith(
+                    "home/ubuntu/snap/openstack/common/logs/"
+                ) and normalized.endswith(".log")
+                if (
+                    normalized
+                    not in {
+                        "var/log/cloud-init-output.log",
+                        "sos_commands/process/ps_auxfwww",
+                        "etc/apt/apt.conf.d/90curtin-aptproxy",
+                    }
+                    and not is_cli_log
+                ):
+                    continue
+                text = _read_archive_member(archive, member)
+                if text is None:
+                    continue
+                source = f"{archive_rel}:{normalized}"
+                if is_cli_log:
+                    result = _machine_add_result_finding(text, source, host)
+                    if result is not None:
+                        findings.append(result)
+                        outcome = (
+                            "COMPLETED"
+                            if result.category == "remote_add_machine_completed"
+                            else "FAILED"
+                        )
+                elif normalized == "var/log/cloud-init-output.log":
+                    findings.extend(_apt_bootstrap_findings(text, source, host))
+                elif normalized == "sos_commands/process/ps_auxfwww":
+                    findings.extend(_running_apt_findings(text, source, host))
+                else:
+                    for line_number, line in enumerate(text.splitlines(), start=1):
+                        if "Acquire::http::Proxy" not in line:
+                            continue
+                        findings.append(
+                            ProbeFinding(
+                                category="apt_proxy_path",
+                                path=source,
+                                line=line_number,
+                                excerpt=_excerpt(f"{host}: {line}"),
+                            )
+                        )
+                        break
+    except (OSError, tarfile.TarError):
+        return [], ""
+    return findings, outcome
+
+
+def _read_archive_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+) -> str | None:
+    extracted = archive.extractfile(member)
+    if extracted is None:
+        return None
+    data = extracted.read(2_000_000 + 1)
+    if b"\x00" in data[: min(len(data), 4096)]:
+        return None
+    return data[:2_000_000].decode("utf-8", errors="replace")
+
+
+def _machine_add_result_finding(
+    text: str,
+    source: str,
+    host: str,
+) -> ProbeFinding | None:
+    lines = text.splitlines()
+    if not any("Starting step 'Add machine'" in line for line in lines):
+        return None
+    for line_number in range(len(lines), 0, -1):
+        line = lines[line_number - 1]
+        match = MACHINE_ADD_RESULT.search(line)
+        if match is None:
+            continue
+        result = match.group("result").upper()
+        category = (
+            "remote_add_machine_completed"
+            if result == "COMPLETED"
+            else "remote_add_machine_failed"
+        )
+        return ProbeFinding(
+            category=category,
+            path=source,
+            line=line_number,
+            excerpt=_excerpt(f"{host}: {line}"),
+        )
+    return None
+
+
+def _apt_bootstrap_findings(
+    text: str,
+    source: str,
+    host: str,
+) -> list[ProbeFinding]:
+    findings: list[ProbeFinding] = []
+    lines = text.splitlines()
+    update_line: int | None = None
+    agent_started = False
+    for line_number, line in enumerate(lines, start=1):
+        if APT_BOOTSTRAP_STAGE.search(line) and update_line is None:
+            update_line = line_number
+        match = APT_FETCH_DURATION.search(line)
+        if match is not None:
+            duration = int(match.group("minutes") or 0) * 60 + int(
+                match.group("seconds")
+            )
+            if duration >= 60:
+                findings.append(
+                    ProbeFinding(
+                        category=(
+                            "apt_deadline_exceeded"
+                            if duration >= 300
+                            else "apt_fetch_timing"
+                        ),
+                        path=source,
+                        line=line_number,
+                        excerpt=_excerpt(
+                            f"{host}: APT fetch took {duration}s: {line.strip()}"
+                        ),
+                    )
+                )
+        if JUJU_AGENT_START.search(line):
+            agent_started = True
+            findings.append(
+                ProbeFinding(
+                    category="agent_started",
+                    path=source,
+                    line=line_number,
+                    excerpt=_excerpt(f"{host}: {line}"),
+                )
+            )
+    if update_line is not None and not agent_started:
+        findings.append(
+            ProbeFinding(
+                category="apt_update_incomplete",
+                path=source,
+                line=update_line,
+                excerpt=(
+                    f"{host}: APT update began, but the captured bootstrap output "
+                    "contains no Juju machine-agent start."
+                ),
+            )
+        )
+    return findings
+
+
+def _running_apt_findings(
+    text: str,
+    source: str,
+    host: str,
+) -> list[ProbeFinding]:
+    lines = text.splitlines()
+    findings: list[ProbeFinding] = []
+    for line_number, line in enumerate(lines, start=1):
+        if not APT_PROCESS.search(line):
+            continue
+        window = "\n".join(lines[max(0, line_number - 5) : line_number + 1])
+        if "/bin/bash" not in window:
+            continue
+        findings.append(
+            ProbeFinding(
+                category="apt_process_running",
+                path=source,
+                line=line_number,
+                excerpt=_excerpt(f"{host}: bootstrap process still running: {line}"),
+            )
+        )
+        break
+    return findings
+
+
+def _as_control_finding(finding: ProbeFinding) -> ProbeFinding:
+    return ProbeFinding(
+        category="successful_join_control",
+        path=finding.path,
+        line=finding.line,
+        excerpt=f"Successful-node control: {finding.excerpt}",
     )
 
 
@@ -599,7 +967,10 @@ def _run_juju_lost_unit_probe(root: Path) -> ProbeResult:
     return ProbeResult(
         name="juju_lost_unit",
         status="triggered",
-        summary="Juju unit-agent/leader loss is a primary failure-surface candidate.",
+        summary=(
+            "A Juju unit-agent/leader loss appears in the final snapshot; treat it "
+            "as a symptom unless its timing links it to the failed operation."
+        ),
         findings=findings[:20],
         missing_evidence=[
             (

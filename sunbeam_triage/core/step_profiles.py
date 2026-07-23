@@ -43,6 +43,7 @@ def profile_for_step(name: str) -> StepProfile | None:
     normalized = name.strip().lower().replace(" ", "_").replace("-", "_")
     aliases = {
         "maas": "sunbeam_maas_deploy",
+        "sunbeam_create_cluster": "sunbeam_deploy",
         "sunbeam_test_with_validation_plugin_no_features": (
             "sunbeam_test_with_validation_plugin_no_features"
         ),

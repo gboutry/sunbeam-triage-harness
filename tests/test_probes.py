@@ -12,6 +12,7 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
 
     assert [result.name for result in results] == [
         "timeout_outcome",
+        "machine_add_timeout",
         "k8s_not_ready",
         "juju_lost_unit",
         "juju_migration",
@@ -23,6 +24,112 @@ def test_k8s_not_ready_probe_is_not_applicable_without_k8s_timeout(tmp_path):
     ]
     assert results[0].status == "not_applicable"
     assert results[0].findings == []
+
+
+def test_machine_add_probe_links_timeout_to_slow_apt_and_successful_control(
+    tmp_path,
+):
+    _write_output(
+        tmp_path,
+        "\n".join([
+            (
+                "12:00:00 Calling ssh ubuntu@host03.maas sudo sunbeam cluster join "
+                "--token super-secret-token"
+            ),
+            "12:05:06 Timeout adding machine 10.0.0.3 to Juju",
+            "12:10:00 TIMED OUT to add machine 10.0.0.3",
+            "12:12:00 Node joined cluster: host05",
+        ]),
+    )
+    _write_sosreport(
+        tmp_path / "generated/sunbeam/sosreport-host03-2026-07-22-a.tar.xz",
+        {
+            "sosreport-host03-2026-07-22-a/var/log/cloud-init-output.log": (
+                "Running apt-get update\nFetched 80.1 MB in 11min 1s (121 kB/s)\n"
+            ),
+            "sosreport-host03-2026-07-22-a/sos_commands/process/ps_auxfwww": (
+                "root 1 0 /bin/bash /var/lib/juju/nonce.sh\n"
+                "root 2 1 apt-get -q update\n"
+            ),
+            "sosreport-host03-2026-07-22-a/etc/apt/apt.conf.d/90curtin-aptproxy": (
+                'Acquire::http::Proxy "http://10.239.8.11:8000";\n'
+            ),
+            "sosreport-host03-2026-07-22-a/home/ubuntu/snap/openstack/common/"
+            "logs/join.log": (
+                "Starting step 'Add machine'\n"
+                "Finished running step 'Add machine' ResultType.FAILED\n"
+            ),
+        },
+    )
+    _write_sosreport(
+        tmp_path / "generated/sunbeam/sosreport-host05-2026-07-22-b.tar.xz",
+        {
+            "sosreport-host05-2026-07-22-b/var/log/cloud-init-output.log": (
+                "Running apt-get update\n"
+                "Fetched 80.1 MB in 1min 56s (690 kB/s)\n"
+                "Starting Juju machine agent\n"
+            ),
+            "sosreport-host05-2026-07-22-b/etc/apt/apt.conf.d/90curtin-aptproxy": (
+                'Acquire::http::Proxy "http://10.239.8.11:8000";\n'
+            ),
+            "sosreport-host05-2026-07-22-b/home/ubuntu/snap/openstack/common/"
+            "logs/join.log": (
+                "Starting step 'Add machine'\n"
+                "Finished running step 'Add machine' ResultType.COMPLETED\n"
+            ),
+        },
+    )
+
+    results = run_preflight_probes(tmp_path, "uuid")
+    result = _probe_by_name(results, "machine_add_timeout")
+
+    assert result.status == "triggered"
+    assert "APT still running or exceeding the deadline" in result.summary
+    categories = {finding.category for finding in result.findings}
+    assert {
+        "machine_add_timeout",
+        "remote_add_machine_failed",
+        "apt_process_running",
+        "apt_deadline_exceeded",
+        "apt_proxy_path",
+        "successful_join_control",
+    } <= categories
+    assert "super-secret-token" not in " ".join(
+        finding.excerpt for finding in result.findings
+    )
+    timeout = _probe_by_name(results, "timeout_outcome")
+    assert "per node" in timeout.summary
+
+
+def test_machine_add_probe_does_not_call_proxy_configuration_the_cause(tmp_path):
+    _write_output(
+        tmp_path,
+        "12:00:00 ssh ubuntu@host03.maas sudo sunbeam cluster join\n"
+        "12:05:06 Timeout adding machine 10.0.0.3 to Juju\n",
+    )
+    _write_sosreport(
+        tmp_path / "generated/sunbeam/sosreport-host03-2026-07-22-a.tar.xz",
+        {
+            "sosreport-host03-2026-07-22-a/etc/apt/apt.conf.d/90curtin-aptproxy": (
+                'Acquire::http::Proxy "http://10.239.8.11:8000";\n'
+            ),
+            "sosreport-host03-2026-07-22-a/home/ubuntu/snap/openstack/common/"
+            "logs/join.log": (
+                "Starting step 'Add machine'\n"
+                "Finished running step 'Add machine' ResultType.FAILED\n"
+            ),
+        },
+    )
+
+    result = _probe_by_name(
+        run_preflight_probes(tmp_path, "uuid"), "machine_add_timeout"
+    )
+
+    assert "APT itself crossed" in result.missing_evidence[-1]
+    assert not any(
+        finding.category in {"apt_process_running", "apt_deadline_exceeded"}
+        for finding in result.findings
+    )
 
 
 def test_timeout_outcome_probe_flags_post_timeout_completion(tmp_path):

@@ -19,12 +19,15 @@ def apply_probe_report_policies(
     initial_evidence: tuple[EvidenceItem, ...] | list[EvidenceItem] = (),
 ) -> DiagnosisReport:
     timeout = _probe(probe_results, "timeout_outcome")
+    machine_add = _probe(probe_results, "machine_add_timeout")
     k8s = _probe(probe_results, "k8s_not_ready")
     migration = _probe(probe_results, "juju_migration")
     csr = _probe(probe_results, "certificate_csr_churn")
     package = _probe(probe_results, "package_install_failure")
     crash = _probe(probe_results, "workload_crash_recovery")
     relations = _probe(probe_results, "relation_blockers")
+    if machine_add is not None and _has_confirmed_machine_add_apt_delay(machine_add):
+        return _machine_add_apt_report(report, machine_add)
     if migration is not None and _has_direct_failed_migration(migration):
         return _deterministic_report(
             report,
@@ -236,6 +239,152 @@ def _has_direct_failed_migration(migration: ProbeResult | None) -> bool:
             )
             for finding in migration.findings
         )
+    )
+
+
+def _has_confirmed_machine_add_apt_delay(probe: ProbeResult | None) -> bool:
+    if probe is None or probe.status != "triggered":
+        return False
+    categories = {finding.category for finding in probe.findings}
+    has_failure = {
+        "machine_add_timeout",
+        "remote_add_machine_failed",
+    } <= categories
+    has_causal_apt = bool(categories & {"apt_process_running", "apt_deadline_exceeded"})
+    return has_failure and has_causal_apt
+
+
+def _machine_add_apt_report(
+    report: DiagnosisReport,
+    probe: ProbeResult,
+) -> DiagnosisReport:
+    role_by_category = {
+        "machine_add_timeout": "failure_trigger",
+        "remote_add_machine_failed": "symptom",
+        "apt_process_running": "root_cause",
+        "apt_update_incomplete": "root_cause",
+        "apt_deadline_exceeded": "root_cause",
+        "apt_fetch_timing": "contributing_factor",
+        "agent_started": "post_failure_outcome",
+        "apt_proxy_path": "contributing_factor",
+        "successful_join_control": "counterevidence",
+    }
+    policy_evidence = [
+        ReportEvidence(
+            path=finding.path,
+            line=finding.line,
+            excerpt=finding.excerpt,
+            id=finding.id,
+            role=role_by_category.get(finding.category, "observation"),
+        )
+        for finding in probe.findings
+    ]
+    evidence = _deduplicate_evidence([*policy_evidence, *report.evidence])
+    trigger_ids = [
+        item.id for item in policy_evidence if item.role == "failure_trigger"
+    ]
+    root_ids = [item.id for item in policy_evidence if item.role == "root_cause"]
+    proxy_ids = [
+        item.id
+        for item in policy_evidence
+        if item.role == "contributing_factor" and "Proxy" in item.excerpt
+    ]
+    outcome_ids = [
+        item.id
+        for item in policy_evidence
+        if item.role in {"post_failure_outcome", "counterevidence"}
+    ]
+    root_cause = (
+        "Juju manual-machine bootstrap was blocked by slow or stalled APT "
+        "repository access, so machine agents did not start within Sunbeam's "
+        "machine-add deadline."
+    )
+    unknown = (
+        "The artifacts do not distinguish whether the configured APT proxy, its "
+        "upstream repositories, or the intervening network caused the latency."
+    )
+    unknowns = list(report.unknowns)
+    if unknown not in unknowns:
+        unknowns.append(unknown)
+    existing_assessment = report.causal_assessment
+    assessment = CausalAssessment(
+        failure_trigger=CausalClaim(
+            claim=(
+                "The CI step failed when multiple Juju machine-add operations "
+                "exceeded their fixed deadline."
+            ),
+            confidence="confirmed",
+            evidence_ids=trigger_ids,
+        ),
+        symptoms=(
+            list(existing_assessment.symptoms)
+            if existing_assessment is not None
+            else []
+        ),
+        contributing_factors=[
+            *(
+                list(existing_assessment.contributing_factors)
+                if existing_assessment is not None
+                else []
+            ),
+            CausalClaim(
+                claim="The affected nodes routed HTTP APT access through a proxy.",
+                confidence=("confirmed" if proxy_ids else "unknown"),
+                evidence_ids=proxy_ids,
+                missing_evidence=(
+                    [] if proxy_ids else ["APT proxy configuration was not captured."]
+                ),
+            ),
+        ],
+        root_cause=CausalClaim(
+            claim=root_cause,
+            confidence="confirmed",
+            evidence_ids=root_ids,
+            missing_evidence=[unknown],
+        ),
+        post_failure_outcome=CausalClaim(
+            claim=(
+                "At least one node completed the same join path, while other "
+                "machine agents started only after their CLI deadlines."
+            ),
+            confidence=("confirmed" if outcome_ids else "unknown"),
+            evidence_ids=outcome_ids,
+        ),
+    )
+    mechanisms = [
+        CandidateMechanism(
+            name="slow or stalled APT access during Juju machine bootstrap",
+            status="confirmed",
+            rationale=probe.summary,
+        ),
+        *[
+            CandidateMechanism(
+                name=item.name,
+                status=(
+                    "speculative"
+                    if item.status in {"confirmed", "supported"}
+                    else item.status
+                ),
+                rationale=item.rationale,
+            )
+            for item in report.candidate_mechanisms
+        ],
+    ]
+    return replace(
+        report,
+        summary=(
+            "The cluster join failed because APT repository access delayed Juju "
+            "manual-machine bootstrap beyond the machine-add deadline."
+        ),
+        root_cause=root_cause,
+        confidence="confirmed",
+        needs_more_evidence=False,
+        evidence=evidence,
+        candidate_mechanisms=mechanisms,
+        unknowns=unknowns,
+        triage_confidence="high",
+        stop_reason="deterministic_machine_add_apt_delay",
+        causal_assessment=assessment,
     )
 
 

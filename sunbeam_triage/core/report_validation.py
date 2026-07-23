@@ -155,17 +155,30 @@ def validate_causal_report(
 
 
 def _role_for_probe_category(category: str) -> str:
-    if category == "timeout_surface":
+    if category in {"timeout_surface", "machine_add_timeout"}:
         return "failure_trigger"
-    if category in {"post_timeout_completion", "later_convergence"}:
+    if category in {
+        "post_timeout_completion",
+        "later_convergence",
+        "agent_started",
+        "successful_join_control",
+    }:
         return "post_failure_outcome"
-    if category in {"failed_migration_signal", "package_install_failure"}:
+    if category in {
+        "failed_migration_signal",
+        "package_install_failure",
+        "apt_process_running",
+        "apt_update_incomplete",
+        "apt_deadline_exceeded",
+    }:
         return "root_cause"
     if category in {
         "relation_blocker",
         "csr_churn",
         "workload_crash",
         "recovery_counterevidence",
+        "apt_fetch_timing",
+        "apt_proxy_path",
     }:
         return "contributing_factor"
     return "symptom"

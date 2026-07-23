@@ -37,6 +37,10 @@ def test_committed_sunbeam_step_profiles_cover_requested_steps():
     assert sum(len(profile.probes) for profile in STEP_PROFILES.values()) >= 80
 
 
+def test_create_cluster_step_uses_deploy_profile():
+    assert profile_for_step("sunbeam_create_cluster") is STEP_PROFILES["sunbeam_deploy"]
+
+
 def test_committed_sunbeam_step_profiles_drop_high_risk_static_probes():
     risky_patterns = {
         "15:24:5",
